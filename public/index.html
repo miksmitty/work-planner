@@ -37,7 +37,7 @@
     <div class="card gcard">
       <div class="toolbar">
         <span class="hint">Hatched = waiting (capacity, developers or a dependency) · grey arrows = dependencies · dotted tail = time to reach 80% confidence</span>
-        <span class="hint" id="gmsg" style="color:#2f6fed;font-weight:600"></span>
+        <span class="hint" id="gmsg" style="color:#946f29;font-weight:600"></span>
         <span class="grow"></span>
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
         <label class="hint" title="Scale the chart to fill the window. Untick (or use Zoom) to scroll sideways at a fixed scale"><input type="checkbox" id="fit" checked> Fit to width</label>
@@ -45,7 +45,6 @@
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
         <button id="png" class="primary">Download PNG</button>
       </div>
-      <div class="hint" style="margin-top:6px">Table editing: click a cell to change it · drag (or shift-click) to select a range, then <b>Ctrl/Cmd+C</b> copy · <b>Ctrl/Cmd+V</b> paste (also from Excel) · drag the square handle at the corner of the selection to copy values down or up · <b>Ctrl/Cmd+D</b> fill down · <b>Delete</b> clears · <b>Enter</b> edits the active cell · <b>Esc</b> closes a dropdown · <b>Ctrl/Cmd+Z</b> undo</div>
       <div id="gantt"></div>
       <div class="legend" id="legend"></div>
     </div>

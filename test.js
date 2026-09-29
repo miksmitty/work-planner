@@ -262,6 +262,15 @@ c = state(8, ['low', 'low']); c.items[0].stage = TRIAGE; c.items[1].dependsOn = 
 r = schedule(c); assert.ok(startOf(r, 'x1') >= row(r, 'x0').end - 1e-9 && r.unscheduled === 0);
 // A dependency never shortens the plan
 c = state(8, ['low', 'low']); const free = schedule(c).totalWeeks; c.items[1].dependsOn = [{ id: 'x0', until: null }]; assert.ok(schedule(c).totalWeeks >= free);
+// "Start at Build": skips the stages before Build once the predecessor is done
+c = state(8, ['low', 'low']); c.items[1].dependsOn = [{ id: 'x0', until: null }];
+const scratch = schedule(c); const skipC = state(8, ['low', 'low']); skipC.items[1].dependsOn = [{ id: 'x0', until: null, fromBuild: true }];
+const sk = schedule(skipC);
+assert.ok(row(sk, 'x1').skipsToBuild && !row(scratch, 'x1').skipsToBuild);
+assert.strictEqual(startOf(sk, 'x1'), row(scratch, 'x1').begin);
+assert.ok(!row(sk, 'x1').bars.some(b => b.type === 'stage' && ['ideation', 'discovery', 'feasibility'].includes(b.stageId)));
+assert.ok(row(sk, 'x1').end < row(scratch, 'x1').end);
+assert.ok(row(sk, 'x1').bars.some(b => b.stageId === 'eng'));
 // Old data without dependsOn is fine
 const nodep = defaultState(); nodep.items.forEach(i => delete i.dependsOn); schedule(nodep); assert.ok(nodep.items.every(i => Array.isArray(i.dependsOn)));
 

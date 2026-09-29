@@ -1,10 +1,10 @@
   :root {
-    --bg:#f6f7f9; --panel:#fff; --text:#1c2430; --muted:#6b7686; --line:#e3e7ed; --accent:#2f6fed; --danger:#e5484d;
-    --queue:#c9ced6;
-    --s0:#8b6fd6; --s1:#e39a2d; --s2:#2f6fed; --s3:#1aa39a; --s4:#3aa356; --s5:#8a94a3; --s6:#d6577f; --s7:#a0803a;
+    --bg:#f5f0e1; --panel:#fff; --text:#1c1c1c; --muted:#6e6e6e; --line:#dcd8cb; --accent:#946f29; --danger:#a80000;
+    --queue:#cfcfcf;
+    --s0:#d9c48a; --s1:#b98e2c; --s2:#946f29; --s3:#e60000; --s4:#6c5312; --s5:#8a8a80; --s6:#4a4a44; --s7:#c9c3b0;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#12161c; --panel:#1a2029; --text:#e6eaf0; --muted:#8d99aa; --line:#2b3441; --accent:#5b93ff; --queue:#3a4350; }
+    :root { --bg:#121212; --panel:#1c1c1c; --text:#ececec; --muted:#9a9a9a; --line:#2f2f2f; --accent:#d4a94a; --queue:#444; }
   }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
@@ -60,7 +60,7 @@
   .step button:first-child { border-radius:6px 0 0 6px; } .step button:last-child { border-radius:0 6px 6px 0; }
   .step input[type=number]::-webkit-inner-spin-button { display:none; } .step input[type=number] { -moz-appearance:textfield; }
   /* gantt: always light, so it can be pasted straight into slides */
-  .gcard { --bg:#f3f5f8; --panel:#fff; --text:#1c2430; --muted:#5f6b7a; --line:#dfe3e8; background:#fff; color:#1c2430; }
+  .gcard { --bg:#f3f5f8; --panel:#fff; --text:#1c1c1c; --muted:#5a5a5a; --line:#dfe3e8; background:#fff; color:#1c1c1c; }
   .gflex { display:flex; border:1px solid #c9ced6; background:#fff; margin-top:8px; }
   .gleft { flex:none; border-right:1px solid #9aa3ad; }
   .gscroll { flex:1; overflow-x:auto; min-width:0; }
@@ -89,9 +89,9 @@
   .dgrid input { width:78px; } .dgrid input[type=date] { width:140px; }
 
 .gleft { position:relative; }
-.cxpick { position:absolute; z-index:6; font-size:11.5px; padding:0 2px; background:#fff; color:#1c2430; border:1px solid #2f6fed; border-radius:3px; }
+.cxpick { position:absolute; z-index:6; font-size:11.5px; padding:0 2px; background:#fff; color:#1c1c1c; border:1px solid #946f29; border-radius:3px; }
 .dateinp { width:112px; }
-.dateinp.bad { border-color:#e5484d !important; outline:2px solid rgba(229,72,77,.35); }
+.dateinp.bad { border-color:#a80000 !important; outline:2px solid rgba(229,72,77,.35); }
 input.wide { flex:1; min-width:320px; }
 
 .chip .stagenum { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:var(--line); color:var(--muted); font-size:11px; font-weight:600; margin-left:2px; }
@@ -111,9 +111,12 @@ input.pri { width:54px; }
 
 .deppop { width:420px !important; height:auto !important; max-height:380px; overflow:auto; padding:10px 12px !important; font-size:12.5px !important; box-shadow:0 8px 30px rgba(0,0,0,.25); border-radius:8px !important; }
 .deppop .dp-head { display:flex; align-items:center; gap:8px; margin-bottom:2px; } .deppop .grow { flex:1; }
-.deppop input.dp-filter { width:100%; margin-bottom:6px; color:#1c2430; background:#fff; border:1px solid #c9ced6; }
+.deppop input.dp-filter { width:100%; margin-bottom:6px; color:#1c1c1c; background:#fff; border:1px solid #c9ced6; }
 .deppop .dp-list { max-height:220px; overflow:auto; border:1px solid #e3e7ed; border-radius:6px; }
 .deppop .dp-row { display:flex; align-items:center; gap:8px; padding:4px 8px; border-bottom:1px solid #eef0f3; cursor:pointer; }
 .deppop .dp-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.deppop select { max-width:170px; font-size:12px; color:#1c2430; background:#fff; border:1px solid #c9ced6; }
+.deppop select { max-width:170px; font-size:12px; color:#1c1c1c; background:#fff; border:1px solid #c9ced6; }
 .deppop button { color:inherit; }
+
+.deppop .dp-fb { display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; cursor:pointer; }
+.deprow label { display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; }

@@ -9,6 +9,7 @@
 //     extra developer, so effort (dev-weeks) and duration are not interchangeable.
 //   - Reuse: a rating (and optional "builds on" link) reduces the effort of reuse-flagged stages (Build by default).
 //   - Dependencies: a use case can depend (finish-to-start) on others, optionally until a given stage completes.
+//     With `fromBuild`, the dependent skips the stages before Build and starts at Build once that predecessor is done.
 //   - WIP limit: at most `wipLimit` use cases in flight at once (no multitasking / Little's law).
 //   - Monte Carlo forecast: sample effort from a PERT-beta distribution, re-run the plan many
 //     times, report P50/P80/P90 completion.
@@ -117,8 +118,8 @@
       if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
       if (!it.buildsOn) it.buildsOn = null;
-      // dependsOn: [{ id, until }] - finish-to-start; `until` = a stage id the predecessor must complete (null = its finish)
-      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null }));
+      // dependsOn: [{ id, until }] - finish-to-start; `until` = a stage id the predecessor must complete (null = its finish); `fromBuild` = start at Build afterwards
+      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null, fromBuild: !!d.fromBuild }));
     });
     return state;
   }
@@ -207,6 +208,8 @@
       while (stack.length) { const id = stack.pop(); if (id === r.item.id) { r.depCycle = true; break; } if (seen.has(id)) continue; seen.add(id); rowById[id].deps.forEach(d => stack.push(d.id)); }
     });
     rows.forEach(r => { if (r.depCycle) r.deps = []; });
+    // "Start at Build": once the predecessor is done, the dependent skips the stages before Build (it builds on what exists).
+    rows.forEach(r => { r.skip = engIdx >= 0 && r.cur < engIdx && r.effort > 0 && r.deps.some(d => d.fromBuild); if (r.skip) r.pre = 0; });
     // When does row p finish stage k (in weeks)? null = not known yet.
     const stageEndOf = (p, k) => {
       if (p.cur > k) return 0;                 // already past that stage when the plan starts
@@ -282,6 +285,7 @@
       const push = (s, i, a, b) => { if (b > a) bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: a, end: b }); };
       if (r.started) for (let i = r.cur; i < stages.length; i++) {
         const s = stages[i];
+        if (r.skip && i < engIdx) continue;   // stages before Build are skipped
         if (i === engIdx) {
           if (!scheduled) continue;
           if (r.engStart > t) {
@@ -305,7 +309,7 @@
         reusePending: r.reuseOnEffort !== 1 && !r.reuseApplied && r.effortBase > 0 && (r.engStart === null || !!r.dep),
         teamCap: r.cap, scheduled,
         queueWeeks: r.engStart !== null && r.readyAt !== Infinity ? r.engStart - r.readyAt : null,
-        bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest), depIssue: r.depCycle ? 'circular' : null,
+        bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest), depIssue: r.depCycle ? 'circular' : null, skipsToBuild: !!r.skip,
         stageEnd: Object.fromEntries(bars.filter(b => b.type === 'stage').map(b => [b.stageId, b.end])),
         end: scheduled ? t : null, endDate: scheduled ? fmtDate(addWeeks(start, t)) : null,
       };
