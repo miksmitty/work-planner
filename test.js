@@ -12,7 +12,7 @@ function state(devs, items) {
   s.config.teamOverhead = 0;
   s.config.wipLimit = 0;
   s.config.complexities.forEach(c => { c.min = c.max = c.effort; });
-  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null, sme: null, sme: null,
+  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null, sme: null, reuse: null, buildsOn: null, sme: null,
     teamCap: null, effortOverride: null, earliestStart: null, overrides: {} }));
   return s;
 }
@@ -161,6 +161,52 @@ assert.deepStrictEqual(avail.config.smeFactors, { L: 1, M: 1.25, H: 1.6 });
 assert.strictEqual(schedule(avail).totalWeeks, mig1);                   // migrating twice changes nothing
 // 1.6 x (2+2+4) = 12.8 weeks before Build; Build starts on a whole week (13), then 3 + 4.8 + 2.
 assert.ok(Math.abs(mig1 - (13 + 3 + 3 * 1.6 + 2)) < 1e-9);
+
+/* ---- reuse of existing plumbing ---- */
+// Factors on Build effort: High x0.5, Medium x0.7, Low x0.85. 'low' = 6 dev-weeks, team cap 2, no overhead.
+const buildWeeks = (st, id = 'x0') => { const b = eng(row(schedule(st), id)); return b ? +(b.end - b.start).toFixed(6) : 0; };
+c = state(4, ['low']);
+assert.strictEqual(buildWeeks(c), 3);                                    // no rating = no reuse
+c.items[0].reuse = 'H'; assert.strictEqual(buildWeeks(c), 1.5);          // 6 x 0.5 = 3 dev-weeks / 2
+c.items[0].reuse = 'M'; assert.strictEqual(buildWeeks(c), +(6 * 0.7 / 2).toFixed(6));
+c.items[0].reuse = 'L'; assert.strictEqual(buildWeeks(c), +(6 * 0.85 / 2).toFixed(6));
+assert.ok(schedule(c).rows[0].reuseApplied && Math.abs(schedule(c).rows[0].reuseSaved - 0.9) < 1e-9);
+c.items[0].effortOverride = 6; assert.strictEqual(buildWeeks(c), 3);     // explicit effort is used as entered
+c.items[0].effortOverride = null;
+c.config.stages.find(s => s.id === 'eng').reuse = false; assert.strictEqual(buildWeeks(c), 3);   // stage not flagged
+c.config.stages.find(s => s.id === 'eng').reuse = true;
+c.config.stages.find(s => s.id === 'discovery').reuse = true;             // fixed stages can be flagged too
+c.items[0].reuse = 'H';
+assert.strictEqual(eng(schedule(c).rows[0]).start, 2 + 1 + 4);            // discovery 2 -> 1
+// "Builds on": the saving only applies once the source use case's Build has finished.
+c = state(4, ['low', 'low']);
+c.items[0].stage = 'eng'; c.items[0].priority = 1;                        // source, already in Build (3 weeks)
+c.items[1].buildsOn = 'x0'; c.items[1].reuse = 'H'; c.items[1].stage = 'eng'; // starts Build at once: source not done
+r = schedule(c);
+assert.ok(!row(r, 'x1').reuseApplied && row(r, 'x1').reusePending);
+assert.strictEqual(buildWeeks(c, 'x1'), 3);                               // no benefit yet
+c.items[1].stage = 'feasibility';                                          // Build starts at week 4 > source done at 3
+r = schedule(c);
+assert.ok(row(r, 'x1').reuseApplied);
+assert.strictEqual(buildWeeks(c, 'x1'), 1.5);
+c.items[0].stage = 'release';                                              // source already past Build
+c.items[1].stage = 'eng';
+assert.strictEqual(buildWeeks(c, 'x1'), 1.5);
+c.items[0].stage = TRIAGE;                                                 // source not in the plan: never delivered
+assert.strictEqual(buildWeeks(c, 'x1'), 3);
+c.items[0].stage = 'ideation'; c.items[0].buildsOn = 'x1'; c.items[1].buildsOn = 'x0'; // circular link: no benefit, no hang
+assert.strictEqual(buildWeeks(c, 'x1'), 3);
+// A link with no rating counts as Medium.
+c = state(4, ['low', 'low']); c.items[0].stage = 'release'; c.items[1].stage = 'eng'; c.items[1].buildsOn = 'x0';
+assert.strictEqual(buildWeeks(c, 'x1'), +(6 * 0.7 / 2).toFixed(6));
+// More reuse never lengthens the plan.
+last = Infinity;
+for (const a of [null, 'L', 'M', 'H']) { c = state(4, ['medium', 'high']); c.items.forEach(i => i.reuse = a); const w = schedule(c).totalWeeks; assert.ok(w <= last); last = w; }
+// Old data gets factors and flags.
+const noreuse = defaultState(); delete noreuse.config.reuseFactors; noreuse.config.stages.forEach(s => delete s.reuse); noreuse.items.forEach(i => { delete i.reuse; delete i.buildsOn; });
+schedule(noreuse);
+assert.deepStrictEqual(noreuse.config.reuseFactors, { H: 0.5, M: 0.7, L: 0.85 });
+assert.ok(noreuse.config.stages.find(s => s.id === 'eng').reuse && !noreuse.config.stages.find(s => s.id === 'discovery').reuse);
 
 // Monte Carlo: ordered percentiles, reproducible, ignores triage rows.
 const d = defaultState();

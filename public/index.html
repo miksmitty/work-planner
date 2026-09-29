@@ -60,7 +60,7 @@
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
-        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low)">SME req.</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low)">SME req.</th><th title="Reuse: how much of the plumbing this use case can build on already exists (High / Medium / Low)">Reuse</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -82,6 +82,11 @@
         <div class="lbl">SME required</div>
         <div class="chips sizes" id="smef"></div>
         <p class="hint help">How much subject-matter-expert (SME) time each use case needs. Rate every use case <b>High</b>, <b>Medium</b> or <b>Low</b> for SME required: a use case that leans heavily on experts (reviews, data access, domain sign-off) spends more elapsed time waiting on them. Stages marked <b>SME</b> above (hover a stage and click SME to change them) have their length multiplied by the factor for that rating. Stage default lengths assume a light touch, so Low ×1 means no delay, Medium ×1.25 adds a quarter and High ×1.6 adds 60%. On Build, the factor multiplies the developer-weeks of effort instead. A blank rating has no effect, and a length or effort you set yourself under a use case's "details" is used exactly as entered. Only stages you flag are affected, because waiting on experts stretches elapsed time, not developer workload. The factors are assumptions; adjust them to match your experience.</p>
+      </div>
+      <div class="row">
+        <div class="lbl">Reuse</div>
+        <div class="chips sizes" id="reusef"></div>
+        <p class="hint help">How much of a use case's engineering can build on components that already exist (pipelines, connectors, prompts, evaluation harnesses, hosting) from earlier deliveries. Rate each use case <b>High</b> (most of the plumbing exists), <b>Medium</b> or <b>Low</b>; blank means none. The factor multiplies the effort of stages marked <b>REUSE</b> above (Build by default; hover a stage and click Reuse to change), so High ×0.5 halves Build effort, Medium ×0.7 and Low ×0.85. Reuse never removes Build entirely: integration and testing remain. Under a use case's "details", <b>Builds on</b> links it to another use case in this plan: the saving then only applies once that use case's Build has finished, so delivering the foundation first matters. If there's a link but no rating, Medium is assumed. Effort you enter yourself under "details" is used exactly as entered. The factors are assumptions; adjust them to match your experience.</p>
       </div>
       <div class="row">
         <div class="lbl">SharePoint links</div>

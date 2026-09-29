@@ -7,6 +7,7 @@
 //     priority (list) order (serial schedule generation with a priority rule).
 //   - Brooks' law: a use case with several developers loses `teamOverhead` of throughput per
 //     extra developer, so effort (dev-weeks) and duration are not interchangeable.
+//   - Reuse: a rating (and optional "builds on" link) reduces the effort of reuse-flagged stages (Build by default).
 //   - WIP limit: at most `wipLimit` use cases in flight at once (no multitasking / Little's law).
 //   - Monte Carlo forecast: sample effort from a PERT-beta distribution, re-run the plan many
 //     times, report P50/P80/P90 completion.
@@ -25,11 +26,14 @@
   // SME REQUIRED by the use case: stretch applied to SME-dependent stages. Stage default lengths assume
   // little SME involvement (Low = no delay). Assumption, editable in the app.
   const DEFAULT_SME = () => ({ L: 1, M: 1.25, H: 1.6 });
+  // REUSE of existing components/plumbing: multiplier on the effort of reuse-flagged stages (Build by default).
+  // High = most of what is needed already exists. Assumption, editable in the app.
+  const DEFAULT_REUSE = () => ({ H: 0.5, M: 0.7, L: 0.85 });
   const DEFAULT_STAGES = () => [
     { id: 'ideation', name: 'Ideation', weeks: 2, sme: true },
     { id: 'discovery', name: 'Discovery', weeks: 2, sme: true },
     { id: 'feasibility', name: 'Feasibility', weeks: 4, sme: true },
-    { id: 'eng', name: 'Build', kind: 'eng' },
+    { id: 'eng', name: 'Build', kind: 'eng', reuse: true },
     { id: 'release', name: 'Validate and Release', weeks: 3, sme: true },
     { id: 'operate', name: 'Operate', weeks: 2 },
   ];
@@ -44,6 +48,7 @@
         id: 'uc' + i, name: 'AI use case ' + i,
         complexity: ['low', 'medium', 'medium', 'high', 'very high'][(i * 7) % 5],
         stage: stagePlan[i - 1], priority: i, stageStart: null, sme: ['H', 'M', 'L', 'M', 'H', null][i % 6],
+        reuse: [null, 'M', 'H', null, 'L', 'H'][i % 6], buildsOn: i === 5 ? 'uc1' : i === 6 ? 'uc2' : i === 9 ? 'uc3' : null,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {},
       });
     }
@@ -56,6 +61,7 @@
         wipLimit: 6,
         smeFactors: DEFAULT_SME(),
         smeSemantics: 'required',
+        reuseFactors: DEFAULT_REUSE(),
         stages: DEFAULT_STAGES(),
         complexities: [
           { key: 'low', name: 'Low', min: 4, effort: 6, max: 10 },
@@ -90,6 +96,8 @@
       c.smeFactors = { H: c.smeFactors.L, M: c.smeFactors.M, L: c.smeFactors.H };
       c.smeSemantics = 'required';
     }
+    if (!c.reuseFactors) c.reuseFactors = DEFAULT_REUSE();
+    c.stages.forEach(st => { if (st.reuse === undefined) st.reuse = st.kind === 'eng'; });
     c.stages.forEach(st => { if (st.sme === undefined) st.sme = ['ideation', 'discovery', 'feasibility', 'release'].includes(st.id); });
     c.complexities.forEach(x => {
       if (x.min == null) x.min = Math.round(x.effort * 0.7);
@@ -102,6 +110,8 @@
       if (it.priority === undefined || it.priority === '') it.priority = null;
       if (it.stageStart === undefined) it.stageStart = null;
       if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
+      if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
+      if (!it.buildsOn) it.buildsOn = null;
     });
     return state;
   }
@@ -136,10 +146,14 @@
     // A use case that needs a lot of SME time (High) stretches SME-dependent stages. A blank rating has no effect,
     // and a per-use-case override is used exactly as entered.
     const smeF = it => (config.smeFactors && config.smeFactors[it.sme]) || 1;
+    // Reuse of existing plumbing shortens reuse-flagged stages. A "builds on" link with no rating counts as Medium.
+    // (On fixed stages the rating always applies; on the engineering stage a "builds on" link is timed, see below.)
+    const reuseKey = it => it.reuse || (it.buildsOn ? 'M' : null);
+    const reuseF = it => (config.reuseFactors && config.reuseFactors[reuseKey(it)]) || 1;
     const weeksFor = (it, s) => {
       const o = it.overrides && it.overrides[s.id];
       if (o != null && o !== '') return Math.max(0, Number(o) || 0);
-      return Math.max(0, (Number(s.weeks) || 0) * (s.sme ? smeF(it) : 1));
+      return Math.max(0, (Number(s.weeks) || 0) * (s.sme ? smeF(it) : 1) * (s.reuse ? reuseF(it) : 1));
     };
 
     const rows = items.map(it => {
@@ -153,17 +167,19 @@
       const pastEng = engIdx >= 0 && cur > engIdx;
       const hasEng = engIdx >= 0 && !triage && !pastEng;
       const sumDur = (from, to) => { let a = 0; for (let i = from; i < to; i++) a += durOf(stages[i], i); return a; };
-      let effort = 0;
+      let effort = 0, reuseOnEffort = 1;
       if (hasEng) {
         if (Number(it.effortOverride) > 0) effort = Number(it.effortOverride);
         else {
           const base = opts.efforts && opts.efforts[it.id] != null ? opts.efforts[it.id] : cx[it.complexity] ? pertMean(cx[it.complexity]) : 0;
           effort = base * (stages[engIdx].sme ? smeF(it) : 1);
+          reuseOnEffort = stages[engIdx].reuse ? reuseF(it) : 1;
         }
       }
       const cap = Math.max(0.1, Number(it.teamCap) || Number(config.defaultTeamCap) || 1);
       return {
-        item: it, cur, triage, durOf, pastEng, effort, cap, remaining: effort, earliest,
+        item: it, cur, triage, durOf, pastEng, effort, effortBase: effort, reuseOnEffort, reuseApplied: false, dep: it.buildsOn || null,
+        cap, remaining: effort, earliest,
         forced: !triage && (cur > 0 || !!it.stageStart),   // already under way: never held back by the WIP limit
         pre: hasEng ? sumDur(cur, engIdx) : 0,
         post: engIdx < 0 || triage ? 0 : sumDur(Math.max(cur, engIdx + 1), stages.length),
@@ -171,6 +187,7 @@
       };
     });
     const active = rows.filter(r => !r.triage);
+    const rowById = Object.fromEntries(rows.map(r => [r.item.id, r]));
 
     if (engIdx < 0) {
       active.forEach(r => { r.started = true; r.startWk = r.earliest; });
@@ -192,7 +209,17 @@
           if (free <= 1e-9) break;
           if (!r.started || r.finish !== null || r.readyAt > t) continue;
           const alloc = Math.min(r.cap, free), prog = alloc * eff(alloc);
-          if (r.engStart === null) r.engStart = t;
+          if (r.engStart === null) {
+            r.engStart = t;
+            // Reuse is realised when Build starts. If this use case builds on another, the saving only
+            // applies once that use case's Build has finished (its plumbing then exists).
+            if (r.reuseOnEffort !== 1) {
+              const d = r.dep ? rowById[r.dep] : null;
+              if (!r.dep || (d && d.engEnd !== null && d.engEnd <= t)) {
+                r.reuseApplied = true; r.effort = r.effortBase * r.reuseOnEffort; r.remaining = r.effort;
+              }
+            }
+          }
           if (r.remaining <= prog) {
             const frac = r.remaining / prog;
             r.engEnd = t + frac; r.finish = r.engEnd + r.post;
@@ -206,7 +233,7 @@
     const out = rows.map(r => {
       const it = r.item, bars = [];
       const stageName = r.triage ? 'Stakeholder Triage' : (stages[r.cur] || {}).name || '';
-      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, sme: it.sme, triage: r.triage };
+      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, sme: it.sme, reuse: it.reuse, buildsOn: it.buildsOn, triage: r.triage };
       if (r.triage) return { ...base, effort: 0, teamCap: r.cap, scheduled: false, queueWeeks: null, bars: [], end: null, endDate: null };
       const scheduled = r.started && (engIdx < 0 || r.engEnd !== null);
       let t = r.startWk ?? r.earliest;
@@ -229,7 +256,9 @@
       const dec = b => ({ ...b, startDate: fmtDate(addWeeks(start, b.start)), endDate: fmtDate(addWeeks(start, b.end)) });
       const first = bars.find(b => b.type === 'stage');
       return {
-        ...base, effort: r.effort, teamCap: r.cap, scheduled,
+        ...base, effort: r.effort, effortBase: r.effortBase, reuseApplied: r.reuseApplied, reuseSaved: r.reuseApplied ? r.effortBase - r.effort : 0,
+        reusePending: r.reuseOnEffort !== 1 && !r.reuseApplied && r.effortBase > 0 && (r.engStart === null || !!r.dep),
+        teamCap: r.cap, scheduled,
         queueWeeks: r.engStart !== null && r.readyAt !== Infinity ? r.engStart - r.readyAt : null,
         bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest),
         end: scheduled ? t : null, endDate: scheduled ? fmtDate(addWeeks(start, t)) : null,

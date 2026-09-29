@@ -100,3 +100,6 @@ input.pri { width:54px; }
 
 .smetag { font-size:9px; font-weight:700; letter-spacing:.04em; color:#fff; background:#7a5af8; border-radius:4px; padding:1px 4px; margin-right:2px; }
 #smef input { width:60px; }
+
+.reusetag { background:#0e9f6e; }
+#reusef input { width:60px; }
