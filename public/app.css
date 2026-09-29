@@ -97,3 +97,6 @@ input.wide { flex:1; min-width:320px; }
 .chip .stagenum { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:var(--line); color:var(--muted); font-size:11px; font-weight:600; margin-left:2px; }
 .chip.triage { opacity:.8; } .chip.triage .tname { font-weight:500; padding:0 4px; }
 input.pri { width:54px; }
+
+.smetag { font-size:9px; font-weight:700; letter-spacing:.04em; color:#fff; background:#7a5af8; border-radius:4px; padding:1px 4px; margin-right:2px; }
+#smef input { width:60px; }

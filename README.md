@@ -24,6 +24,7 @@ npm run start:fresh    # or use "Reset to test data" on the Use cases tab
 - Every use case has a current stage. Default stages: Ideation → Discovery → Feasibility → Build → Validate and Release → Operate (all editable; Build is the engineering stage).
 - **Stage 0, Stakeholder Triage:** the clock has not started (the use case is still being refined with its submitter), so it is left out of the plan until you move it to a real stage.
 - Earlier stages than a use case's current stage are skipped, and an optional "in stage since" date counts time already spent.
+- **SME availability (High / Medium / Low)** per use case stretches the stages that depend on subject-matter experts (Ideation, Discovery, Feasibility, Validate and Release by default; toggle per stage): High ×1, Medium ×1.25, Low ×1.6 (editable assumptions). A blank rating has no effect, and explicit overrides are never stretched.
 - Rows are sorted by most advanced stage first, then by priority (1 = highest); developers are handed out in the same order.
 - Engineering length comes from complexity (best / likely / worst dev-weeks, PERT-weighted) and a shared pool of developers.
 - Standard techniques: three-point (PERT) estimating, resource-constrained scheduling, a WIP limit, a Brooks'-law team-overhead penalty, and a Monte Carlo forecast (50 / 80 / 90% dates).

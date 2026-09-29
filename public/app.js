@@ -50,7 +50,7 @@ async function init() {
     state = Scheduler.normalize(Scheduler.defaultState());
     noSave = true; // never overwrite the real saved plan with fallback data
   }
-  bind(); renderStages(); renderSizes(); renderRows(); update();
+  bind(); renderStages(); renderSizes(); renderSme(); renderRows(); update();
 }
 function bind() {
   const c = () => state.config;
@@ -93,7 +93,7 @@ function bind() {
   };
   $('#reset').onclick = async () => {
     if (!confirm('Replace everything with the sample data?')) return;
-    state = Scheduler.normalize(await getJSON('api/seed')); syncInputs(); renderStages(); renderSizes(); renderRows(); update();
+    state = Scheduler.normalize(await getJSON('api/seed')); syncInputs(); renderStages(); renderSizes(); renderSme(); renderRows(); update();
   };
   document.querySelectorAll('.capbar input[data-nudge]').forEach(inp => {
     const wrap = document.createElement('span'); wrap.className = 'step';
@@ -110,12 +110,12 @@ function pickField(rect) {
   const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
   const sel = document.createElement('select'); sel.className = 'cxpick';
   sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
-  sel.innerHTML = kind === 'stage' ? stageOptions(it.stage)
+  sel.innerHTML = kind === 'stage' ? stageOptions(it.stage) : kind === 'sme' ? smeOptions(it.sme)
     : state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   // close() is safe to call more than once: removing a focused select fires blur, which calls it again.
   let closed = false;
   const close = () => { if (closed) return; closed = true; sel.onblur = null; if (sel.parentNode) sel.parentNode.removeChild(sel); };
-  sel.onchange = () => { if (kind === 'stage') it.stage = sel.value; else it.complexity = sel.value; close(); renderRows(); update(); };
+  sel.onchange = () => { if (kind === 'stage') it.stage = sel.value; else if (kind === 'sme') it.sme = sel.value || null; else it.complexity = sel.value; close(); renderRows(); update(); };
   sel.onblur = close;
   sel.onkeydown = e => { if (e.key === 'Escape') close(); };
   box.appendChild(sel); sel.focus(); try { sel.showPicker(); } catch {}
@@ -138,10 +138,12 @@ function syncInputs() {
 }
 const TRIAGE = Scheduler.TRIAGE;
 // "0. Stakeholder Triage" = clock not started; then the configured stages in order.
+const SME_LABEL = { H: 'High', M: 'Medium', L: 'Low' };
+const smeOptions = sel => `<option value="" ${!sel ? 'selected' : ''}>–</option>` + ['H', 'M', 'L'].map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${SME_LABEL[k]}</option>`).join('');
 const stageOptions = sel => `<option value="${TRIAGE}" ${sel === TRIAGE ? 'selected' : ''}>0. Stakeholder Triage</option>` +
   state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('');
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
-  stage: state.config.stages[0]?.id, priority: null, stageStart: null, teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
 
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
@@ -150,11 +152,11 @@ function renderStages() {
   st.forEach((s, i) => {
     const eng = s.kind === 'eng';
     const el = document.createElement('div'); el.className = 'chip' + (eng ? ' eng' : ''); el.style.setProperty('--c', color(i));
-    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">
+    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">${s.sme ? '<span class="smetag" title="This stage is stretched when SME availability is Medium or Low">SME</span>' : ''}
       ${eng ? `<span class="by" title="Set by complexity and developers">by complexity</span>`
             : `<input type="number" min="0" step="1" value="${s.weeks ?? 0}" aria-label="Weeks"><span class="muted">wk</span>`}
       <span class="tools">
-        <button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
+        <button data-a="sme" title="${s.sme ? 'Stop' : 'Start'} stretching this stage by SME availability">SME</button><button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
         ${eng ? '' : `<button data-a="eng" title="Make this the engineering stage (length driven by complexity &amp; developers)">⚙</button><button data-a="del" title="Remove stage">✕</button>`}
       </span>`;
     const [name, weeks] = el.querySelectorAll('input');   // number span is not an input
@@ -168,6 +170,7 @@ function renderStages() {
         const fallback = (st[Math.max(0, i - 1)] || {}).id;   // use cases in the removed stage move back one stage
         state.items.forEach(it => { if (it.stage === s.id) it.stage = fallback; if (it.overrides) delete it.overrides[s.id]; });
       }
+      else if (a === 'sme') { s.sme = !s.sme; }
       else if (a === 'eng') { const old = st.find(x => x.kind === 'eng'); if (old) { delete old.kind; old.weeks = 2; } delete s.weeks; s.kind = 'eng'; }
       renderStages(); renderRows(); update();
     });
@@ -177,6 +180,15 @@ function renderStages() {
   const add = document.createElement('button'); add.textContent = '+ Stage';
   add.onclick = () => { st.push({ id: uid('s'), name: 'New stage', weeks: 2 }); renderStages(); renderRows(); update(); };
   box.appendChild(add);
+}
+function renderSme() {
+  const box = $('#smef'); box.innerHTML = '';
+  ['H', 'M', 'L'].forEach(k => {
+    const el = document.createElement('div'); el.className = 'chip';
+    el.innerHTML = `<span>${SME_LABEL[k]}</span><span class="muted">×</span><input type="number" min="1" max="5" step="0.05" value="${state.config.smeFactors[k]}" aria-label="${SME_LABEL[k]} availability factor">`;
+    el.querySelector('input').oninput = e => { state.config.smeFactors[k] = Math.max(0.1, Number(e.target.value) || 1); update(); };
+    box.appendChild(el);
+  });
 }
 function renderSizes() {
   const box = $('#sizes'); box.innerHTML = '';
@@ -203,6 +215,7 @@ function renderRows() {
       <td><select data-f="stage">${stageOptions(it.stage)}</select></td>
       <td><input type="number" class="pri" min="1" step="1" data-f="priority" placeholder="–" value="${it.priority ?? ''}"></td>
       <td><select data-f="complexity">${opts}</select></td>
+      <td><select data-f="sme" title="SME availability">${smeOptions(it.sme)}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
@@ -211,8 +224,8 @@ function renderRows() {
     tr.querySelectorAll('[data-f]').forEach(el => {
       const f = el.dataset.f;
       if (f === 'name') el.oninput = () => { it.name = el.value; update(); };
-      else el.onchange = () => {   // stage / priority / complexity change the sort order, so redraw the (re-sorted) list
-        it[f] = f === 'priority' ? num(el.value) : el.value;
+      else el.onchange = () => {   // stage / priority change the sort order, so redraw the (re-sorted) list
+        it[f] = f === 'priority' ? num(el.value) : (f === 'sme' ? (el.value || null) : el.value);
         renderRows(); update();
       };
     });
@@ -229,7 +242,7 @@ function renderRows() {
 function detailsRow(it) {
   const tr = document.createElement('tr'); tr.className = 'details';
   const fixed = state.config.stages.filter(s => s.kind !== 'eng');
-  tr.innerHTML = `<td></td><td colspan="9"><div class="dgrid">
+  tr.innerHTML = `<td></td><td colspan="10"><div class="dgrid">
     <label title="ID of the item in the SharePoint list">SharePoint ID <input type="text" data-t="spId" value="${esc(it.spId ?? '')}"></label>
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
     <label title="Date this use case entered its current stage. Time already spent counts towards that stage's length (fixed-length stages only). Blank = starts fresh at the plan start.">In stage since <input type="text" class="dateinp" data-d="stageStart" placeholder="dd-mmm-yyyy"></label>
@@ -272,6 +285,7 @@ const GUESS = {
   url: /url|link|href|item ?path/i,
   stage: /stage|status|phase/i,
   priority: /priorit|rank/i,
+  sme: /sme|expert|availab/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -299,6 +313,14 @@ function parsePriority(val) {
   const w = { critical: 1, urgent: 1, high: 1, medium: 2, normal: 2, med: 2, low: 3 }; 
   const k = Object.keys(w).find(x => v.includes(x)); return k ? w[k] : null;
 }
+// SME availability: H / M / L or High / Medium / Low.
+function parseSme(val) {
+  const v = String(val || '').trim().toLowerCase(); if (!v) return null;
+  if (v === 'h' || v.includes('high')) return 'H';
+  if (v === 'm' || v.includes('med')) return 'M';
+  if (v === 'l' || v.includes('low')) return 'L';
+  return null;
+}
 function openImport() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,text/csv,.txt';
   inp.onchange = async () => { const f = inp.files[0]; if (f) showImport(parseCSV(await f.text()), f.name); };
@@ -306,7 +328,7 @@ function openImport() {
 }
 function planImport(rows, map, prefix, mode) {
   const head = rows[0], col = k => map[k] === '' ? -1 : head.indexOf(map[k]);
-  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority') };
+  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme') };
   const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set(), unmatchedStage: new Set() };
   const seen = new Set();
   rows.slice(1).forEach(r => {
@@ -319,8 +341,9 @@ function planImport(rows, map, prefix, mode) {
     let stage = ci.stage >= 0 ? matchStage(g(ci.stage)) : null;
     if (ci.stage >= 0 && !stage && g(ci.stage)) out.unmatchedStage.add(g(ci.stage));
     const priority = ci.pri >= 0 ? parsePriority(g(ci.pri)) : null;
+    const sme = ci.sme >= 0 ? parseSme(g(ci.sme)) : null;
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
-    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, existing });
+    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, existing });
     existing ? out.updates++ : out.adds++;
   });
   return out;
@@ -340,6 +363,7 @@ function showImport(rows, fileName) {
       <label>Item URL</label><select data-m="url">${opts(guess('url'))}</select>
       <label title="Stakeholder Triage / 0, a stage number 1-${state.config.stages.length}, or a stage name">Stage / status</label><select data-m="stage">${opts(guess('stage'))}</select>
       <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
+      <label title="SME availability: High / Medium / Low (or H / M / L)">SME availability</label><select data-m="sme">${opts(guess('sme'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
       <label>If ID already exists</label>
@@ -352,7 +376,7 @@ function showImport(rows, fileName) {
   const preview = () => {
     const { map, prefix, mode } = read();
     const p = planImport(rows, map, prefix, mode === 'update' ? 'update' : 'add');
-    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.stage === TRIAGE ? 'Triage' : (state.config.stages.find(x => x.id === i.stage) || {}).name || 'first stage')} · P${i.priority ?? '–'} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
+    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.stage === TRIAGE ? 'Triage' : (state.config.stages.find(x => x.id === i.stage) || {}).name || 'first stage')} · P${i.priority ?? '–'} · SME ${i.sme || '–'} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
     dlg.querySelector('#imp-prev').innerHTML = `<b>${mode === 'replace' ? p.items.length + ' will replace all existing' : p.adds + ' new, ' + p.updates + ' updated'}</b>${p.skipped ? ` · ${p.skipped} blank rows skipped` : ''}` +
       (!map.name ? `<div class="warn">Choose a Name column.</div>` : '') +
       (p.unmatchedStage.size ? `<div class="warn">Unrecognised stage (will use ${esc(state.config.stages[0]?.name || 'first stage')}): ${[...p.unmatchedStage].slice(0, 8).map(esc).join(', ')}</div>` : '') +
@@ -370,8 +394,8 @@ function showImport(rows, fileName) {
     if (mode === 'replace') state.items = [];
     const dflt = state.config.complexities[1]?.key || state.config.complexities[0].key;
     p.items.forEach(i => {
-      if (i.existing) { i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; return; }
-      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, stageStart: null,
+      if (i.existing) { i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; return; }
+      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, stageStart: null,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
     });
     if (prefix) state.config.spLinkBase = prefix;
@@ -418,7 +442,7 @@ const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
 let NAME_W = Math.min(700, Math.max(90, Number(lsGet('nameW')) || 206));
-const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
+const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['sme', 46, 'SME'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -465,13 +489,13 @@ function leftSVG(L, ui = true) {
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
     .concat(plan.rows.map((r, i) => {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
-      return { itemId: r.id, cx: cxName(it.complexity), stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
+      return { itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
   rows.forEach((r, i) => {
     const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
     o += `<line x1="0" x2="${lw()}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
-    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.stage || '', String(r.pri ?? ''), r.cx || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
-    if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; }
+    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
+    if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; }
     vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = r.triage && k > 1;
@@ -481,6 +505,7 @@ function leftSVG(L, ui = true) {
     if (ui && i > 0) {
       o += `<rect data-pick="stage" data-id="${esc(r.itemId)}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change stage</title></rect>`;
       o += `<rect data-pick="cx" data-id="${esc(r.itemId)}" x="${xs[4]}" y="${y}" width="${cols()[4][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
+      o += `<rect data-pick="sme" data-id="${esc(r.itemId)}" x="${xs[5]}" y="${y}" width="${cols()[5][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change SME availability (H / M / L)</title></rect>`;
     }
   });
   return `<line x1="0" x2="${lw()}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;

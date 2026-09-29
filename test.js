@@ -12,7 +12,7 @@ function state(devs, items) {
   s.config.teamOverhead = 0;
   s.config.wipLimit = 0;
   s.config.complexities.forEach(c => { c.min = c.max = c.effort; });
-  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null,
+  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null, sme: null, sme: null,
     teamCap: null, effortOverride: null, earliestStart: null, overrides: {} }));
   return s;
 }
@@ -125,6 +125,33 @@ r = schedule(c);
 assert.strictEqual(eng(row(r, 'x0')).start, 0);
 assert.strictEqual(eng(row(r, 'x1')).start, 0);
 assert.ok(row(r, 'x2').bars[0].type === 'queue'); // ideation-stage item has to wait for a slot
+
+/* ---- SME availability ---- */
+// Factors: H 1.0, M 1.25, L 1.6 on SME-dependent stages (ideation, discovery, feasibility, release).
+c = state(4, ['low']);
+const smeTotal = () => schedule(c).rows[0].bars.filter(b => b.type === 'stage' && b.key !== 'eng').reduce((a, b) => a + (b.end - b.start), 0);
+const neutral = smeTotal();
+assert.strictEqual(neutral, 2 + 2 + 4 + 3 + 2);                       // blank = no effect
+c.items[0].sme = 'H'; assert.strictEqual(smeTotal(), neutral);         // High = no delay
+c.items[0].sme = 'L';
+assert.ok(Math.abs(smeTotal() - ((2 + 2 + 4 + 3) * 1.6 + 2)) < 1e-9);  // Operate is not SME-dependent
+assert.strictEqual(eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start, 3); // Build unaffected by default
+// Explicit override is used as entered.
+c.items[0].overrides = { discovery: 2 };
+assert.ok(Math.abs(smeTotal() - ((2 + 4 + 3) * 1.6 + 2 + 2)) < 1e-9);
+// Flag Build as SME-dependent: effort scales too (6 dev-weeks x 1.6, team of 2 => 4.8 weeks).
+c.config.stages.find(s => s.id === 'eng').sme = true;
+assert.ok(Math.abs((eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start) - 4.8) < 1e-9);
+c.items[0].effortOverride = 6;                                          // ...unless the effort is set explicitly
+assert.strictEqual(eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start, 3);
+// Lower availability never shortens the plan.
+let last = 0;
+for (const a of ['H', 'M', 'L']) { c = state(4, ['low', 'medium']); c.items.forEach(i => i.sme = a); const w = schedule(c).totalWeeks; assert.ok(w >= last); last = w; }
+// Old data without smeFactors / flags is migrated.
+const nosme = defaultState(); delete nosme.config.smeFactors; nosme.config.stages.forEach(s => delete s.sme);
+schedule(nosme);
+assert.deepStrictEqual(nosme.config.smeFactors, { H: 1, M: 1.25, L: 1.6 });
+assert.ok(nosme.config.stages.find(s => s.id === 'discovery').sme && !nosme.config.stages.find(s => s.id === 'eng').sme);
 
 // Monte Carlo: ordered percentiles, reproducible, ignores triage rows.
 const d = defaultState();

@@ -5,21 +5,29 @@
     "defaultTeamCap": 2,
     "teamOverhead": 0.1,
     "wipLimit": 10,
+    "smeFactors": {
+      "H": 1,
+      "M": 1.25,
+      "L": 1.6
+    },
     "stages": [
       {
         "id": "ideation",
         "name": "Ideation",
-        "weeks": 2
+        "weeks": 2,
+        "sme": true
       },
       {
         "id": "discovery",
         "name": "Discovery",
-        "weeks": 2
+        "weeks": 2,
+        "sme": true
       },
       {
         "id": "feasibility",
         "name": "Feasibility",
-        "weeks": 4
+        "weeks": 4,
+        "sme": true
       },
       {
         "id": "eng",
@@ -29,7 +37,8 @@
       {
         "id": "release",
         "name": "Validate and Release",
-        "weeks": 3
+        "weeks": 3,
+        "sme": true
       },
       {
         "id": "operate",
@@ -76,6 +85,7 @@
       "stage": "eng",
       "priority": 1,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -88,6 +98,7 @@
       "stage": "eng",
       "priority": 2,
       "stageStart": null,
+      "sme": "L",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -100,6 +111,7 @@
       "stage": "release",
       "priority": 3,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -112,6 +124,7 @@
       "stage": "operate",
       "priority": 4,
       "stageStart": null,
+      "sme": "H",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -124,6 +137,7 @@
       "stage": "feasibility",
       "priority": 5,
       "stageStart": null,
+      "sme": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -136,6 +150,7 @@
       "stage": "feasibility",
       "priority": 6,
       "stageStart": null,
+      "sme": "H",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -148,6 +163,7 @@
       "stage": "discovery",
       "priority": 7,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -160,6 +176,7 @@
       "stage": "discovery",
       "priority": 8,
       "stageStart": null,
+      "sme": "L",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -172,6 +189,7 @@
       "stage": "ideation",
       "priority": 9,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -184,6 +202,7 @@
       "stage": "ideation",
       "priority": 10,
       "stageStart": null,
+      "sme": "H",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -196,6 +215,7 @@
       "stage": "ideation",
       "priority": 11,
       "stageStart": null,
+      "sme": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -208,6 +228,7 @@
       "stage": "ideation",
       "priority": 12,
       "stageStart": null,
+      "sme": "H",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -220,6 +241,7 @@
       "stage": "triage",
       "priority": 13,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -232,6 +254,7 @@
       "stage": "triage",
       "priority": 14,
       "stageStart": null,
+      "sme": "L",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -244,6 +267,7 @@
       "stage": "triage",
       "priority": 15,
       "stageStart": null,
+      "sme": "M",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -256,6 +280,7 @@
       "stage": "triage",
       "priority": 16,
       "stageStart": null,
+      "sme": "H",
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -268,6 +293,7 @@
       "stage": "triage",
       "priority": 17,
       "stageStart": null,
+      "sme": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,

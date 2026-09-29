@@ -22,12 +22,14 @@
   }
 
   const TRIAGE = 'triage';
+  // Stretch on SME-dependent stages by SME availability (High = no delay). Assumption, editable in the app.
+  const DEFAULT_SME = () => ({ H: 1, M: 1.25, L: 1.6 });
   const DEFAULT_STAGES = () => [
-    { id: 'ideation', name: 'Ideation', weeks: 2 },
-    { id: 'discovery', name: 'Discovery', weeks: 2 },
-    { id: 'feasibility', name: 'Feasibility', weeks: 4 },
+    { id: 'ideation', name: 'Ideation', weeks: 2, sme: true },
+    { id: 'discovery', name: 'Discovery', weeks: 2, sme: true },
+    { id: 'feasibility', name: 'Feasibility', weeks: 4, sme: true },
     { id: 'eng', name: 'Build', kind: 'eng' },
-    { id: 'release', name: 'Validate and Release', weeks: 3 },
+    { id: 'release', name: 'Validate and Release', weeks: 3, sme: true },
     { id: 'operate', name: 'Operate', weeks: 2 },
   ];
 
@@ -40,7 +42,7 @@
       items.push({
         id: 'uc' + i, name: 'AI use case ' + i,
         complexity: ['low', 'medium', 'medium', 'high', 'very high'][(i * 7) % 5],
-        stage: stagePlan[i - 1], priority: i, stageStart: null,
+        stage: stagePlan[i - 1], priority: i, stageStart: null, sme: ['H', 'M', 'L', 'M', 'H', null][i % 6],
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {},
       });
     }
@@ -51,6 +53,7 @@
         defaultTeamCap: 2,
         teamOverhead: 0.1,
         wipLimit: 6,
+        smeFactors: DEFAULT_SME(),
         stages: DEFAULT_STAGES(),
         complexities: [
           { key: 'low', name: 'Low', min: 4, effort: 6, max: 10 },
@@ -76,6 +79,8 @@
     }
     if (c.teamOverhead == null) c.teamOverhead = 0.1;
     if (c.wipLimit == null) c.wipLimit = 6;
+    if (!c.smeFactors) c.smeFactors = DEFAULT_SME();
+    c.stages.forEach(st => { if (st.sme === undefined) st.sme = ['ideation', 'discovery', 'feasibility', 'release'].includes(st.id); });
     c.complexities.forEach(x => {
       if (x.min == null) x.min = Math.round(x.effort * 0.7);
       if (x.max == null) x.max = Math.round(x.effort * 1.75);
@@ -86,6 +91,7 @@
       if (it.stage !== TRIAGE && !c.stages.some(s => s.id === it.stage)) it.stage = first; // missing / removed stage
       if (it.priority === undefined || it.priority === '') it.priority = null;
       if (it.stageStart === undefined) it.stageStart = null;
+      if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
     });
     return state;
   }
@@ -117,9 +123,13 @@
     const pool = Number(config.devResources) || 0;
     const overhead = Math.max(0, Number(config.teamOverhead) || 0);
     const wip = Number(config.wipLimit) || 0;
+    // Low SME availability stretches SME-dependent stages. A blank availability has no effect,
+    // and a per-use-case override is used exactly as entered.
+    const smeF = it => (config.smeFactors && config.smeFactors[it.sme]) || 1;
     const weeksFor = (it, s) => {
       const o = it.overrides && it.overrides[s.id];
-      return Math.max(0, Number(o != null && o !== '' ? o : s.weeks) || 0);
+      if (o != null && o !== '') return Math.max(0, Number(o) || 0);
+      return Math.max(0, (Number(s.weeks) || 0) * (s.sme ? smeF(it) : 1));
     };
 
     const rows = items.map(it => {
@@ -136,8 +146,10 @@
       let effort = 0;
       if (hasEng) {
         if (Number(it.effortOverride) > 0) effort = Number(it.effortOverride);
-        else if (opts.efforts && opts.efforts[it.id] != null) effort = opts.efforts[it.id];
-        else if (cx[it.complexity]) effort = pertMean(cx[it.complexity]);
+        else {
+          const base = opts.efforts && opts.efforts[it.id] != null ? opts.efforts[it.id] : cx[it.complexity] ? pertMean(cx[it.complexity]) : 0;
+          effort = base * (stages[engIdx].sme ? smeF(it) : 1);
+        }
       }
       const cap = Math.max(0.1, Number(it.teamCap) || Number(config.defaultTeamCap) || 1);
       return {
@@ -184,7 +196,7 @@
     const out = rows.map(r => {
       const it = r.item, bars = [];
       const stageName = r.triage ? 'Stakeholder Triage' : (stages[r.cur] || {}).name || '';
-      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, triage: r.triage };
+      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, sme: it.sme, triage: r.triage };
       if (r.triage) return { ...base, effort: 0, teamCap: r.cap, scheduled: false, queueWeeks: null, bars: [], end: null, endDate: null };
       const scheduled = r.started && (engIdx < 0 || r.engEnd !== null);
       let t = r.startWk ?? r.earliest;

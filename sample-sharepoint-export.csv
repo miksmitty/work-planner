@@ -1,8 +1,8 @@
-ID,Title,Status,Priority,Complexity,Owner,Item URL
-101,Invoice matching assistant,Build,1,High,Finance,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=101
-102,"Contract clause extraction, legal",Feasibility,2,Very High,Legal,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=102
+ID,Title,Status,Priority,Complexity,SME Availability,Owner,Item URL
+101,Invoice matching assistant,Build,1,High,High,Finance,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=101
+102,"Contract clause extraction, legal",Feasibility,2,Very High,Low,Legal,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=102
 103,"Support ticket triage
-(multi-line title)",Stakeholder Triage,High,Medium,Support,
-104,HR policy Q&A bot,2. Discovery,(3) Low,L,HR,javascript:alert(1)
-105,Demand forecasting,Ideation,,Enormous,Supply,
-,,,,,,
+(multi-line title)",Stakeholder Triage,High,Medium,Medium,Support,
+104,HR policy Q&A bot,2. Discovery,(3) Low,L,M,HR,javascript:alert(1)
+105,Demand forecasting,Ideation,,Enormous,,Supply,
+,,,,,,,
