@@ -1,0 +1,226 @@
+{
+  "config": {
+    "startDate": "2026-10-05",
+    "devResources": 17,
+    "defaultTeamCap": 2,
+    "complexities": [
+      {
+        "key": "low",
+        "name": "Low",
+        "effort": 6,
+        "min": 4,
+        "max": 11
+      },
+      {
+        "key": "medium",
+        "name": "Medium",
+        "effort": 12,
+        "min": 8,
+        "max": 21
+      },
+      {
+        "key": "high",
+        "name": "High",
+        "effort": 24,
+        "min": 17,
+        "max": 42
+      },
+      {
+        "key": "very high",
+        "name": "Very high",
+        "effort": 40,
+        "min": 28,
+        "max": 70
+      }
+    ],
+    "stages": [
+      {
+        "id": "discovery",
+        "name": "Discovery",
+        "weeks": 2
+      },
+      {
+        "id": "pov",
+        "name": "Proof of value",
+        "weeks": 4
+      },
+      {
+        "id": "eng",
+        "name": "Engineering",
+        "kind": "eng"
+      },
+      {
+        "id": "prod",
+        "name": "Production readiness",
+        "weeks": 2
+      },
+      {
+        "id": "deploy",
+        "name": "Deployment",
+        "weeks": 1
+      },
+      {
+        "id": "support",
+        "name": "Support transition",
+        "weeks": 2
+      }
+    ],
+    "teamOverhead": 0.1,
+    "wipLimit": 10
+  },
+  "items": [
+    {
+      "id": "uc1",
+      "name": "AI use case 1",
+      "complexity": "high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc2",
+      "name": "AI use case 2",
+      "complexity": "very high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc3",
+      "name": "AI use case 3",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc4",
+      "name": "AI use case 4",
+      "complexity": "high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc5",
+      "name": "AI use case 5",
+      "complexity": "low",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc6",
+      "name": "AI use case 6",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc7",
+      "name": "AI use case 7",
+      "complexity": "very high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc8",
+      "name": "AI use case 8",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc9",
+      "name": "AI use case 9",
+      "complexity": "high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc10",
+      "name": "AI use case 10",
+      "complexity": "low",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc11",
+      "name": "AI use case 11",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc12",
+      "name": "AI use case 12",
+      "complexity": "very high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc13",
+      "name": "AI use case 13",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc14",
+      "name": "AI use case 14",
+      "complexity": "high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc15",
+      "name": "AI use case 15",
+      "complexity": "low",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc16",
+      "name": "AI use case 16",
+      "complexity": "medium",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    },
+    {
+      "id": "uc17",
+      "name": "AI use case 17",
+      "complexity": "very high",
+      "teamCap": null,
+      "effortOverride": null,
+      "earliestStart": null,
+      "overrides": {}
+    }
+  ]
+}

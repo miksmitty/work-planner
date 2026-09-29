@@ -11,6 +11,14 @@ npm test
 
 Plan data is saved to `data.json` (git-ignored). Set `PORT` to change the port.
 
+## Test data
+
+`seed-data.json` holds a ready-made test plan (17 placeholder use cases). It is loaded automatically the first time the app starts, when there is no `data.json`. To discard your changes and reload it:
+
+```bash
+npm run start:fresh    # or use "Reset to test data" on the Use cases tab
+```
+
 ## What it does
 
 - Every use case moves through configurable stages (default: Discovery → Proof of value → Engineering → Production readiness → Deployment → Support transition).

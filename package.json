@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:fresh": "node server.js --reset",
     "test": "node test.js"
   },
   "engines": { "node": ">=18" }

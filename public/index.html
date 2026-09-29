@@ -147,7 +147,7 @@
         <button id="bulk">Bulk add…</button>
         <button id="import" title="Import use cases from a SharePoint list export (CSV)">Import CSV…</button>
         <span class="hint" id="importMsg"></span>
-        <button class="ghost" id="reset">Reset sample data</button>
+        <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
         <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Complexity</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
@@ -211,9 +211,9 @@ function bind() {
     t.split('\n').map(s => s.trim()).filter(Boolean).forEach(n => state.items.push(newItem(n)));
     renderRows(); update();
   };
-  $('#reset').onclick = () => {
+  $('#reset').onclick = async () => {
     if (!confirm('Replace everything with the sample data?')) return;
-    state = Scheduler.defaultState(); syncInputs(); renderStages(); renderSizes(); renderRows(); update();
+    state = Scheduler.normalize(await (await fetch('/api/seed')).json()); syncInputs(); renderStages(); renderSizes(); renderRows(); update();
   };
   document.querySelectorAll('.capbar input[data-nudge]').forEach(inp => {
     const wrap = document.createElement('span'); wrap.className = 'step';

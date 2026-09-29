@@ -7,12 +7,18 @@ const { defaultState, schedule, normalize } = require('./public/scheduler.js');
 const PORT = process.env.PORT || 3417;
 const PUBLIC = path.join(__dirname, 'public');
 const DATA = path.join(__dirname, 'data.json');
+const SEED = path.join(__dirname, 'seed-data.json');
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
 };
 
+// Test data committed with the repo; used when there is no saved plan yet (or with --reset).
+function loadSeed() {
+  try { return normalize(JSON.parse(fs.readFileSync(SEED, 'utf8'))); }
+  catch { return defaultState(); }
+}
 function loadState() {
   try { return normalize(JSON.parse(fs.readFileSync(DATA, 'utf8'))); }
   catch { return defaultState(); }
@@ -40,6 +46,11 @@ function valid(s) {
     /^\d{4}-\d{2}-\d{2}$/.test(s.config.startDate);
 }
 
+if (process.argv.includes('--reset') || !fs.existsSync(DATA)) {
+  saveState(loadSeed());
+  console.log('Loaded test data from seed-data.json');
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
@@ -50,6 +61,7 @@ http.createServer(async (req, res) => {
       saveState(state);
       return json(res, 200, { ok: true });
     }
+    if (url.pathname === '/api/seed' && req.method === 'GET') return json(res, 200, loadSeed());
     if (url.pathname === '/api/schedule' && req.method === 'GET') return json(res, 200, schedule(loadState()));
 
     const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
