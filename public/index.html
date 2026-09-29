@@ -41,7 +41,7 @@
         <span class="grow"></span>
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
         <label class="hint" title="Scale the chart to fill the window. Untick (or use Zoom) to scroll sideways at a fixed scale"><input type="checkbox" id="fit" checked> Fit to width</label>
-        <label class="hint" title="Pixels per day. Moving it turns off Fit to width">Zoom <input id="zoom" type="range" min="1" max="8" step="0.5" value="2"></label>
+        <label class="hint" title="Pixels per day. Moving it turns off Fit to width">Zoom <input id="zoom" type="range" min="1" max="16" step="0.5" value="2"></label>
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
         <button id="png" class="primary">Download PNG</button>
       </div>
@@ -57,6 +57,7 @@
         <span class="grow"></span>
         <button class="primary" id="add">+ Add</button>
         <button id="bulk">Bulk add…</button>
+        <button id="export" title="Download the use cases as a CSV backup (can be re-imported with Import CSV)">Download CSV</button>
         <button id="import" title="Import use cases from a SharePoint list export (CSV)">Import CSV…</button>
         <span class="hint" id="importMsg"></span>
         <button class="ghost" id="reset">Reset to test data</button>

@@ -88,6 +88,15 @@ function bind() {
   $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; saveColW(); renderGantt(); };
   $('#add').onclick = () => { state.items.push(newItem('New use case')); renderRows(); update(); };
   $('#import').onclick = openImport;
+  $('#export').onclick = downloadCSV;
+  // Browser zoom is shared by every tab of the page, so take over Ctrl/Cmd +/-/0 and Ctrl/Cmd+wheel (pinch) and keep a separate zoom per tab
+  document.addEventListener('wheel', e => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); stepZoom(e.deltaY < 0 ? 0.05 : -0.05); } }, { passive: false });
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); stepZoom(0.1); }
+    else if (e.key === '-') { e.preventDefault(); stepZoom(-0.1); }
+    else if (e.key === '0') { e.preventDefault(); stepZoom(0, true); }
+  });
   $('#bulk').onclick = () => {
     const t = prompt('One use case name per line:'); if (!t) return;
     t.split('\n').map(s => s.trim()).filter(Boolean).forEach(n => state.items.push(newItem(n)));
@@ -110,32 +119,33 @@ function bind() {
 function pickDeps(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id); if (!it) return;
-  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect(), zf = Number(document.body.style.zoom) || 1;
   const others = Scheduler.orderItems(state).filter(o => o.id !== it.id);
   const cur = Object.fromEntries((it.dependsOn || []).map(d => [d.id, d.until || '']));
+  const curHb = Object.fromEntries((it.dependsOn || []).map(d => [d.id, !!d.holdBuild]));
   const curFb = Object.fromEntries((it.dependsOn || []).map(d => [d.id, !!d.fromBuild]));
   const snap = JSON.stringify(state.items);
   const stageOpts = sel => `<option value="">finishes</option>` + state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>completes ${i + 1}. ${esc(s.name)}</option>`).join('');
   const pop = document.createElement('div'); pop.className = 'cxpick deppop';
-  pop.style.left = Math.max(0, rr.left - br.left) + 'px'; pop.style.top = (rr.bottom - br.top + 2) + 'px';
+  pop.style.left = Math.max(8, Math.min(rr.left, innerWidth - 736 * zf)) / zf + 'px'; pop.style.top = Math.max(8, Math.min(rr.bottom + 2, innerHeight - 560 * zf)) / zf + 'px';
   pop.innerHTML = `<div class="dp-head"><b>Depends on</b> · ${esc(it.name)}<span class="grow"></span><button class="ghost dp-x" title="Discard changes (Esc)">Cancel</button><button class="primary dp-ok">Done</button></div>
-    <div class="hint" style="margin:2px 0 6px">This use case can't start until every ticked use case has reached the point chosen. If it is already under way, it keeps running its current stage and its Build waits. Tick <b>start at Build</b> to skip its earlier stages once that predecessor is done, rather than starting from scratch.</div>
+    <div class="hint" style="margin:2px 0 8px">Tick the use cases that must finish (or reach a stage) before this one can start. <b>Only Build waits</b> lets its earlier stages (Ideation, Discovery…) run straight away and holds just Build until the predecessor is done. <b>Start at Build</b> instead skips those earlier stages.</div>
     <input type="text" class="dp-filter" placeholder="Filter use cases…">
-    <div class="dp-list">${others.map(o => `<label class="dp-row" data-name="${esc((o.spId || '') + ' ' + o.name).toLowerCase()}"><input type="checkbox" data-id="${esc(o.id)}" ${o.id in cur ? 'checked' : ''}><span class="dp-name">${esc((o.spId ? o.spId + ' · ' : '') + o.name)}</span><select data-until="${esc(o.id)}" ${o.id in cur ? '' : 'disabled'}>${stageOpts(cur[o.id])}</select><label class="dp-fb" title="Once this predecessor is done, skip the stages before Build and start at Build instead of from scratch"><input type="checkbox" data-fb="${esc(o.id)}" ${curFb[o.id] ? 'checked' : ''} ${o.id in cur ? '' : 'disabled'}>start at Build</label></label>`).join('') || '<div class="hint">No other use cases yet.</div>'}</div>`;
-  box.appendChild(pop);
+    <div class="dp-list">${others.map(o => `<label class="dp-row${o.id in cur ? ' on' : ''}" data-name="${esc((o.spId || '') + ' ' + o.name).toLowerCase()}"><input type="checkbox" data-id="${esc(o.id)}" ${o.id in cur ? 'checked' : ''}><span class="dp-name">${esc((o.spId ? o.spId + ' · ' : '') + o.name)}</span><span class="dp-opts"><select data-until="${esc(o.id)}" ${o.id in cur ? '' : 'disabled'}>${stageOpts(cur[o.id])}</select><label class="dp-fb" title="Once this predecessor is done, skip the stages before Build and start at Build instead of from scratch"><input type="checkbox" data-fb="${esc(o.id)}" ${curFb[o.id] ? 'checked' : ''} ${o.id in cur ? '' : 'disabled'}>start at Build</label><label class="dp-fb" title="The earlier stages (before Build) start straight away; only Build waits until this predecessor is done"><input type="checkbox" data-hb="${esc(o.id)}" ${curHb[o.id] ? 'checked' : ''} ${o.id in cur ? '' : 'disabled'}>only Build waits</label></span></label>`).join('') || '<div class="hint">No other use cases yet.</div>'}</div>`;
+  document.body.appendChild(pop);
   let closed = false;
   const close = save => {
     if (closed) return; closed = true; document.removeEventListener('mousedown', away, true);
     if (pop.parentNode) pop.parentNode.removeChild(pop);
     if (save) {
-      const next = [...pop.querySelectorAll('input[data-id]:checked')].map(c => ({ id: c.dataset.id, until: pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).value || null, fromBuild: pop.querySelector(`input[data-fb="${CSS.escape(c.dataset.id)}"]`).checked }));
+      const next = [...pop.querySelectorAll('input[data-id]:checked')].map(c => ({ id: c.dataset.id, until: pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).value || null, fromBuild: pop.querySelector(`input[data-fb="${CSS.escape(c.dataset.id)}"]`).checked, holdBuild: pop.querySelector(`input[data-hb="${CSS.escape(c.dataset.id)}"]`).checked }));
       if (JSON.stringify(next) !== JSON.stringify(it.dependsOn || [])) { undoStack.push(snap); it.dependsOn = next; renderRows(); update(); gmsg(`Dependencies updated (${next.length})`); }
     }
     $('#gantt').focus({ preventScroll: true });
   };
   const away = e => { if (!e.composedPath().includes(pop)) close(true); };
   setTimeout(() => document.addEventListener('mousedown', away, true), 0);
-  pop.addEventListener('change', e => { const c = e.target; if (!c.dataset.id) return; pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).disabled = !c.checked; pop.querySelector(`input[data-fb="${CSS.escape(c.dataset.id)}"]`).disabled = !c.checked; });
+  pop.addEventListener('change', e => { const c = e.target; if (!c.dataset.id) return; pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).disabled = !c.checked; pop.querySelector(`input[data-fb="${CSS.escape(c.dataset.id)}"]`).disabled = pop.querySelector(`input[data-hb="${CSS.escape(c.dataset.id)}"]`).disabled = !c.checked; c.closest('.dp-row').classList.toggle('on', c.checked); });
   pop.querySelector('.dp-filter').addEventListener('input', e => { const q = e.target.value.trim().toLowerCase(); pop.querySelectorAll('.dp-row').forEach(r => { r.style.display = !q || r.dataset.name.includes(q) ? '' : 'none'; }); });
   pop.querySelector('.dp-ok').onclick = () => close(true); pop.querySelector('.dp-x').onclick = () => close(false);
   pop.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); close(true); } });
@@ -145,10 +155,10 @@ function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id), kind = rect.dataset.pick; if (!it) return;
   if (kind === 'dep') return pickDeps(rect);
-  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect(), zf = Number(document.body.style.zoom) || 1;
   if (kind === 'pri') {   // priority is a number, so use an input rather than a list
     const inp = document.createElement('input'); inp.type = 'number'; inp.min = 1; inp.step = 1; inp.className = 'cxpick'; inp.value = it.priority ?? '';
-    inp.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
+    inp.style.cssText = `left:${(rr.left - br.left) / zf}px;top:${(rr.top - br.top) / zf}px;width:${rr.width / zf}px;height:${rr.height / zf}px`;
     let done = false;
     const finish = save => { if (done) return; done = true; inp.onblur = null; const v = num(inp.value);
       if (inp.parentNode) inp.parentNode.removeChild(inp);
@@ -159,7 +169,7 @@ function pickField(rect) {
     box.appendChild(inp); inp.focus(); inp.select(); return;
   }
   const sel = document.createElement('select'); sel.className = 'cxpick';
-  sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
+  sel.style.cssText = `left:${(rr.left - br.left) / zf}px;top:${(rr.top - br.top) / zf}px;width:${rr.width / zf}px;height:${rr.height / zf}px`;
   sel.innerHTML = kind === 'stage' ? stageOptions(it.stage) : kind === 'sme' ? smeOptions(it.sme) : kind === 'reuse' ? reuseOptions(it.reuse)
     : state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   // close() is safe to call more than once: removing a focused select fires blur, which calls it again.
@@ -313,9 +323,10 @@ function renderDeps(box, it) {
     state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>completes ${i + 1}. ${esc(s.name)}</option>`).join('');
   box.innerHTML = `<div class="hint" style="margin:8px 0 4px" title="Finish-to-start: this use case cannot start until every use case listed here has reached the point you choose. Circular links are ignored."><b>Depends on</b> (this use case can't start until each of these …)</div>` +
     it.dependsOn.map((d, i) => `<div class="deprow"><select data-di="${i}" data-dk="id" title="Predecessor use case">${others.some(o => o.id === d.id) ? '' : `<option value="${esc(d.id)}" selected>(missing use case)</option>`}${others.map(o => `<option value="${esc(o.id)}" ${o.id === d.id ? 'selected' : ''}>${esc(label(o))}</option>`).join('')}</select>
-      <select data-di="${i}" data-dk="until" title="What the predecessor must complete first">${stageOpts(d.until)}</select><label title="Once this predecessor is done, skip the stages before Build and start at Build instead of from scratch"><input type="checkbox" data-di="${i}" data-dfb ${d.fromBuild ? 'checked' : ''}> start at Build</label><button class="ghost" data-dx="${i}" title="Remove this dependency">✕</button></div>`).join('') +
+      <select data-di="${i}" data-dk="until" title="What the predecessor must complete first">${stageOpts(d.until)}</select><label title="Once this predecessor is done, skip the stages before Build and start at Build instead of from scratch"><input type="checkbox" data-di="${i}" data-dfb ${d.fromBuild ? 'checked' : ''}> start at Build</label><label title="The earlier stages (before Build) start straight away; only Build waits until this predecessor is done"><input type="checkbox" data-di="${i}" data-dhb ${d.holdBuild ? 'checked' : ''}> only Build waits</label><button class="ghost" data-dx="${i}" title="Remove this dependency">✕</button></div>`).join('') +
     `<button data-dadd ${others.length ? '' : 'disabled'}>+ Add dependency</button>`;
   box.querySelectorAll('select[data-dk]').forEach(el => el.onchange = () => { it.dependsOn[Number(el.dataset.di)][el.dataset.dk] = el.value || null; update(); });
+  box.querySelectorAll('[data-dhb]').forEach(el => el.onchange = () => { it.dependsOn[Number(el.dataset.di)].holdBuild = el.checked; update(); });
   box.querySelectorAll('[data-dfb]').forEach(el => el.onchange = () => { it.dependsOn[Number(el.dataset.di)].fromBuild = el.checked; update(); });
   box.querySelectorAll('[data-dx]').forEach(b => b.onclick = () => { it.dependsOn.splice(Number(b.dataset.dx), 1); renderDeps(box, it); update(); });
   const add = box.querySelector('[data-dadd]');
@@ -560,7 +571,7 @@ const gridActive = () => gsel && $('#gantt').contains(document.activeElement) &&
 const cellText = (it, key) => key === 'stage' ? (it.stage === TRIAGE ? 'Stakeholder Triage' : (state.config.stages.find(s => s.id === it.stage) || {}).name || '')
   : key === 'priority' ? String(it.priority ?? '')
   : key === 'complexity' ? (state.config.complexities.find(c => c.key === it.complexity) || {}).name || ''
-  : key === 'dependsOn' ? (it.dependsOn || []).map(d => displayId(d.id) + (d.until ? '>' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) : '') + (d.fromBuild ? ' @build' : '')).join(', ')
+  : key === 'dependsOn' ? (it.dependsOn || []).map(d => displayId(d.id) + (d.until ? '>' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join(', ')
   : SME_LABEL[it[key]] || '';
 // Parse pasted text for a column. Returns { ok, value }.
 function parseCell(key, text, it) {
@@ -568,15 +579,15 @@ function parseCell(key, text, it) {
   if (key === 'dependsOn') {   // "12>Build, 15 @build": use case (SharePoint ID, name or row number), optional ">stage" = until that stage completes
     const out = [];
     for (const tok of t.split(/[,;]+/).map(x => x.trim()).filter(Boolean)) {
-      const fromBuild = /\s*@build\s*$/i.test(tok);
-      const [ref, st] = tok.replace(/\s*@build\s*$/i, '').split(/\s*>\s*/), low = ref.trim().toLowerCase();
+      const fromBuild = /\s*@build\b/i.test(tok), holdBuild = /\s*@hold\b/i.test(tok);
+      const [ref, st] = tok.replace(/\s*@(build|hold)\b/gi, '').split(/\s*>\s*/), low = ref.trim().toLowerCase();
       let cand = state.items.find(o => o.spId && o.spId.toLowerCase() === low) || state.items.find(o => o.name.toLowerCase() === low);
       if (!cand && /^\d+$/.test(low)) { const r = plan.rows[+low - 1], o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
       if (!cand) return { ok: false };
       let until = null;
       if (st) { until = matchStage(st); if (!until || until === TRIAGE) return { ok: false }; }
       if (it && cand.id === it.id) continue;          // a use case can't depend on itself
-      if (!out.some(d => d.id === cand.id)) out.push({ id: cand.id, until, fromBuild });
+      if (!out.some(d => d.id === cand.id)) out.push({ id: cand.id, until, fromBuild, holdBuild });
     }
     return { ok: true, value: out };
   }
@@ -748,11 +759,18 @@ const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+const tabZoom = () => { try { return JSON.parse(lsGet('tabZoom')) || {}; } catch { return {}; } };
+function applyZoom() { const z = tabZoom()[activeTab] || 1; document.body.style.zoom = z === 1 ? '' : z; }
+function stepZoom(d, reset) {
+  const tz = tabZoom(), z = reset ? 1 : Math.min(3, Math.max(0.5, Math.round(((tz[activeTab] || 1) + d) * 100) / 100));
+  tz[activeTab] = z; lsSet('tabZoom', JSON.stringify(tz)); applyZoom(); if (activeTab === 'timeline' && plan) renderGantt();
+}
 function showTab(t) {
   if (!document.getElementById('tab-' + t)) t = 'timeline';
   activeTab = t; lsSet('tab', t);
   document.querySelectorAll('.panel').forEach(p => p.hidden = p.id !== 'tab-' + t);
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  applyZoom();
   if (t === 'timeline' && plan) renderGantt();
 }
 const showToday = () => $('#today').checked;
@@ -903,6 +921,18 @@ function renderGantt() {
 function legendItems() {
   return [...state.config.stages.map((s, i) => ({ c: pal(i), t: s.name })),
     { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }];
+}
+
+function downloadCSV() {
+  const cxName = k => (state.config.complexities.find(c => c.key === k) || {}).name || '';
+  const stName = k => (state.config.stages.find(x => x.id === k) || {}).name || '';
+  const q = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const idOf = id => { const i = state.items.find(x => x.id === id); return i ? (i.spId || i.name) : id; };
+  const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On']]
+    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id)).join('; ')]));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }));
+  a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
 function downloadPNG() {

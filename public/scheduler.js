@@ -119,7 +119,7 @@
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
       if (!it.buildsOn) it.buildsOn = null;
       // dependsOn: [{ id, until }] - finish-to-start; `until` = a stage id the predecessor must complete (null = its finish); `fromBuild` = start at Build afterwards
-      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null, fromBuild: !!d.fromBuild }));
+      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null, fromBuild: !!d.fromBuild, holdBuild: !!d.holdBuild }));
     });
     return state;
   }
@@ -221,7 +221,11 @@
       return t;
     };
     const depEnd = d => { const k = d.until ? stages.findIndex(s => s.id === d.until) : stages.length - 1; return stageEndOf(rowById[d.id], k < 0 ? stages.length - 1 : k); };
-    const depsMet = (r, t) => r.deps.every(d => { const e = depEnd(d); return e !== null && e <= t + 1e-9; });
+    // `holdBuild` dependencies don't delay the start: the early stages run at once and only Build waits.
+    rows.forEach(r => { r.holds = r.deps.some(d => d.holdBuild); });
+    const metAt = (list, t) => list.every(d => { const e = depEnd(d); return e !== null && e <= t + 1e-9; });
+    const depsMet = (r, t) => metAt(r.deps.filter(d => !d.holdBuild), t);
+    const buildMet = (r, t) => metAt(r.forced ? r.deps : r.deps.filter(d => d.holdBuild), t);
 
     if (engIdx < 0) {
       active.forEach(r => { r.started = true; r.startWk = r.earliest; });
@@ -230,6 +234,7 @@
       const begin = (r, t, inflight) => {
         r.started = true; r.startWk = t; r.readyAt = t + r.pre;
         r.depAt = r.deps.reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
+        r.startDepAt = r.deps.filter(d => !d.holdBuild).reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
         if (r.effort <= 1e-9) { r.engStart = r.engEnd = r.readyAt; r.finish = r.engEnd + r.post; }
       };
       for (let t = 0; t < 1000 && active.some(r => r.finish === null); t++) {
@@ -244,11 +249,11 @@
           if (free <= 1e-9) break;
           if (!r.started || r.finish !== null || r.readyAt > t) continue;
           // Already under way (so not held at the start): its Build waits until its dependencies are met.
-          if (r.forced && r.engStart === null && !depsMet(r, t)) continue;
+          if (r.engStart === null && !buildMet(r, t)) continue;
           const alloc = Math.min(r.cap, free), prog = alloc * eff(alloc);
           if (r.engStart === null) {
             r.engStart = t;
-            if (r.forced) r.depAt = r.deps.reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
+            if (r.forced || r.holds) r.depAt = r.deps.reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
             // Reuse is realised when Build starts. If this use case builds on another, the saving only
             // applies once that use case's Build has finished (its plumbing then exists).
             if (r.reuseOnEffort !== 1) {
@@ -277,7 +282,7 @@
       if (r.triage && r.triageW > 0) bars.push({ key: 'triage', stageId: null, name: 'Stakeholder Triage (estimated)', type: 'triage', start: 0, end: r.triageW });
       const waitFrom = r.triage ? r.triageW : r.earliest;
       if (r.started && r.startWk > waitFrom + 1e-9) {
-        const depTo = Math.min(r.startWk, r.depAt);   // part of the wait that is a dependency, then any wait for capacity
+        const depTo = Math.min(r.startWk, r.startDepAt ?? r.depAt);   // part of the wait that is a dependency, then any wait for capacity
         if (depTo > waitFrom + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: waitFrom, end: depTo });
         const from = Math.max(waitFrom, depTo);
         if (r.startWk > from + 1e-9) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: from, end: r.startWk });
@@ -289,7 +294,7 @@
         if (i === engIdx) {
           if (!scheduled) continue;
           if (r.engStart > t) {
-            const depTo = r.forced ? Math.min(r.engStart, Math.max(t, r.depAt)) : t;   // part of the wait that is a dependency
+            const depTo = (r.forced || r.holds) ? Math.min(r.engStart, Math.max(t, r.depAt)) : t;   // part of the wait that is a dependency
             if (depTo > t + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: t, end: depTo });
             if (r.engStart > depTo + 1e-9) bars.push({ key: 'queue', stageId: null, name: 'Waiting for developers', type: 'queue', start: depTo, end: r.engStart });
           }
