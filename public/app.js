@@ -199,7 +199,7 @@ const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complex
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
   const st = state.config.stages, box = $('#stages'); box.innerHTML = '';
-  { const el = document.createElement('div'); el.className = 'chip triage'; el.style.setProperty('--c', '#a5a5a5');
+  { const el = document.createElement('div'); el.className = 'chip triage'; el.style.setProperty('--c', '#8a94a3');
     el.title = "Stakeholder Triage: back-and-forth with the submitter before approval. The delivery clock hasn't started, but the plan still predicts the use case by assuming triage takes this many weeks, then work begins.";
     el.innerHTML = `<span class="stagenum">0</span><span class="tname">Stakeholder Triage</span><input type="number" min="0" step="1" value="${state.config.triageWeeks ?? 4}" aria-label="Estimated triage weeks"><span class="muted">wk est.</span>`;
     el.querySelector('input').oninput = e => { state.config.triageWeeks = Math.max(0, Number(e.target.value) || 0); update(); };
@@ -711,7 +711,7 @@ document.addEventListener('mousedown', e => {   // clicking away drops the selec
 });
 
 /* ---- Gantt: one SVG design used for both screen and PNG export ---- */
-const PAL = ['#d9c48a','#b98e2c','#946f29','#e60000','#6c5312','#8a8a80','#4a4a44','#c9c3b0'];
+const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
 // Mouse-over explanations for the table columns (Gantt header and Use cases table).
@@ -800,7 +800,7 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#333">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
   const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
@@ -814,7 +814,7 @@ function leftSVG(L, ui = true) {
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = r.triage && k === 2;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#6c5312' : dim ? '#a5a5a5' : '#1c1c1c'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
@@ -824,9 +824,9 @@ function leftSVG(L, ui = true) {
   });
   if (selPos.length) {   // outline + fill handle
     const sx = xs[gsel.c0], sw = xs[gsel.c1] + cs[gsel.c1][1] - sx, pmin = selPos[0], pmax = selPos[selPos.length - 1];
-    o += `<rect x="${sx + 1}" y="${HH + (pmin + 1) * RH + 1}" width="${sw - 2}" height="${(pmax - pmin + 1) * RH - 2}" fill="none" stroke="#946f29" stroke-width="2" pointer-events="none"/>`;
-    if (fillPrev) o += `<rect x="${sx + 1}" y="${HH + (fillPrev.p0 + 1) * RH + 1}" width="${sw - 2}" height="${(fillPrev.p1 - fillPrev.p0 + 1) * RH - 2}" fill="rgba(148,111,41,.10)" stroke="#946f29" stroke-dasharray="4 3" pointer-events="none"/>`;
-    o += `<rect data-fill x="${sx + sw - 5}" y="${HH + (pmax + 2) * RH - 5}" width="9" height="9" fill="#946f29" stroke="#fff" stroke-width="1.5" style="cursor:ns-resize"><title>Drag up or down to copy these values into other rows</title></rect>`;
+    o += `<rect x="${sx + 1}" y="${HH + (pmin + 1) * RH + 1}" width="${sw - 2}" height="${(pmax - pmin + 1) * RH - 2}" fill="none" stroke="#2f6fed" stroke-width="2" pointer-events="none"/>`;
+    if (fillPrev) o += `<rect x="${sx + 1}" y="${HH + (fillPrev.p0 + 1) * RH + 1}" width="${sw - 2}" height="${(fillPrev.p1 - fillPrev.p0 + 1) * RH - 2}" fill="rgba(47,111,237,.08)" stroke="#2f6fed" stroke-dasharray="4 3" pointer-events="none"/>`;
+    o += `<rect data-fill x="${sx + sw - 5}" y="${HH + (pmax + 2) * RH - 5}" width="9" height="9" fill="#2f6fed" stroke="#fff" stroke-width="1.5" style="cursor:ns-resize"><title>Drag up or down to copy these values into other rows</title></rect>`;
   }
   return `<line x1="0" x2="${W}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
 }
@@ -838,11 +838,11 @@ function rightSVG(L) {
   for (let d = new Date(L.t0); d < L.t1;) {
     const y = d.getUTCFullYear(), m = d.getUTCMonth(), nx = new Date(Date.UTC(y, m + 1, 1));
     const x1 = L.X(d), x2 = L.X(nx), isQ = m % 3 === 0;
-    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="10.5" text-anchor="middle" fill="#333">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
+    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="10.5" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
     grid += `<line x1="${x1}" x2="${x1}" y1="${isQ ? 0 : HH / 2}" y2="${H}" stroke="${isQ ? '#8b95a1' : '#e2e5ea'}"/>`;
     if (isQ) {
       const q2 = L.X(new Date(Date.UTC(y, m + 3, 1)));
-      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="11" font-weight="600" text-anchor="middle" fill="#1c1c1c">Q${m / 3 + 1} ${y}</text>`;
+      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="11" font-weight="600" text-anchor="middle" fill="#1c2430">Q${m / 3 + 1} ${y}</text>`;
     }
     d = nx;
   }
@@ -861,8 +861,8 @@ function rightSVG(L) {
       const tip = `<title>${esc(r.name)} — ${esc(b.name)}: ${esc(shortDate(b.startDate))} → ${esc(shortDate(b.endDate))} (${wk(b.end - b.start)} wks)</title>`;
       if (b.type === 'queue') o += `<g>${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
       else if (b.type === 'triage') {
-        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#a5a5a5" stroke-dasharray="3 2"/>`;
-        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#5a5a5a">${esc(clip('Triage (est.)', w - 8))}</text>`;
+        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
+        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
         o += '</g>';
       } else {
         o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
@@ -873,20 +873,20 @@ function rightSVG(L) {
     const f = fc && fc.rows[r.id];
     if (f && r.end != null && f.p80 > r.end + 0.05) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;
-      o += `<g><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5a5a5a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5a5a5a"/></g>`;
+      o += `<g><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5f6b7a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5f6b7a"/></g>`;
     }
   });
   // dependency arrows (predecessor's completion point -> successor's start)
   (plan.links || []).forEach(l => {
     const pf = plan.rows.findIndex(r => r.id === l.from), pt = plan.rows.findIndex(r => r.id === l.to); if (pf < 0 || pt < 0) return;
     const y1 = HH + (pf + 1) * RH + RH / 2, y2 = HH + (pt + 1) * RH + RH / 2, x1 = L.XW(l.at), x2 = L.XW(l.toStart), xm = x1 + Math.min(6, Math.max(2, (x2 - x1) / 2));
-    o += `<g><title>Dependency: ${esc(plan.rows[pt].name)} starts after ${esc(plan.rows[pf].name)}</title><path d="M${x1},${y1} H${xm} V${y2} H${x2 - 1}" fill="none" stroke="#5a5a5a" stroke-width="1.2" opacity=".9"/><polygon points="${x2},${y2} ${x2 - 5},${y2 - 3} ${x2 - 5},${y2 + 3}" fill="#5a5a5a"/></g>`;
+    o += `<g><title>Dependency: ${esc(plan.rows[pt].name)} starts after ${esc(plan.rows[pf].name)}</title><path d="M${x1},${y1} H${xm} V${y2} H${x2 - 1}" fill="none" stroke="#5f6b7a" stroke-width="1.2" opacity=".9"/><polygon points="${x2},${y2} ${x2 - 5},${y2 - 3} ${x2 - 5},${y2 + 3}" fill="#5f6b7a"/></g>`;
   });
   if (showToday()) {
     const now = Date.now();
     if (now >= L.t0 && now <= L.t1) {
       const x = L.X(now), lab = 'Today ' + shortDate(new Date(now));
-      o += `<line x1="${x}" x2="${x}" y1="${HH}" y2="${H}" stroke="#1c1c1c" stroke-width="1.5"/><rect x="${x - 34}" y="${HH + 1}" width="68" height="14" rx="3" fill="#1c1c1c"/><text x="${x}" y="${HH + 11.5}" font-size="9.5" text-anchor="middle" fill="#fff" font-weight="600">Today</text>`;
+      o += `<line x1="${x}" x2="${x}" y1="${HH}" y2="${H}" stroke="#d93025" stroke-width="1.5"/><rect x="${x - 34}" y="${HH + 1}" width="68" height="14" rx="3" fill="#d93025"/><text x="${x}" y="${HH + 11.5}" font-size="9.5" text-anchor="middle" fill="#fff" font-weight="600">Today</text>`;
     }
   }
   return o;
@@ -902,7 +902,7 @@ function renderGantt() {
 }
 function legendItems() {
   return [...state.config.stages.map((s, i) => ({ c: pal(i), t: s.name })),
-    { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5a5a5a', t: '80% confidence tail' }];
+    { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }];
 }
 
 function downloadPNG() {
@@ -910,9 +910,9 @@ function downloadPNG() {
   const title = `Work plan · ${state.config.devResources} developers · planned finish ${shortDate(plan.endDate)}` +
     (fc ? ` · 80% confident by ${shortDate(fc.p80.date)}` : '');
   let lg = '', x = 10;
-  legendItems().forEach(i => { lg += `<rect x="${x}" y="${TH + L.height + 10}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${TH + L.height + 19}" font-size="11" fill="#333">${esc(i.t)}</text>`; x += 15 + i.t.length * 6 + 18; });
+  legendItems().forEach(i => { lg += `<rect x="${x}" y="${TH + L.height + 10}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${TH + L.height + 19}" font-size="11" fill="#33404f">${esc(i.t)}</text>`; x += 15 + i.t.length * 6 + 18; });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Helvetica, Arial, sans-serif">${SVG_DEFS}
-    <rect width="${W}" height="${H}" fill="#fff"/><text x="10" y="22" font-size="15" font-weight="700" fill="#1c1c1c">${esc(title)}</text>
+    <rect width="${W}" height="${H}" fill="#fff"/><text x="10" y="22" font-size="15" font-weight="700" fill="#1c2430">${esc(title)}</text>
     <g transform="translate(0,${TH})">${leftSVG(L, false)}</g><g transform="translate(${lw()},${TH})">${rightSVG(L)}</g>${lg}</svg>`;
   const scale = Math.min(2, 16000 / W), img = new Image();
   img.onload = () => {
