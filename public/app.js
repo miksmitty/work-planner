@@ -105,15 +105,18 @@ function bind() {
 }
 // Inline complexity picker over a Gantt row.
 function pickComplexity(rect) {
-  document.querySelectorAll('.cxpick').forEach(x => x.remove());
+  document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items[Number(rect.dataset.cx)]; if (!it) return;
   const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
   const sel = document.createElement('select'); sel.className = 'cxpick';
   sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
   sel.innerHTML = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
-  sel.onchange = () => { it.complexity = sel.value; sel.remove(); renderRows(); update(); };
-  sel.onblur = () => sel.remove();
-  sel.onkeydown = e => { if (e.key === 'Escape') sel.remove(); };
+  // close() is safe to call more than once: removing a focused select fires blur, which calls it again.
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; sel.onblur = null; if (sel.parentNode) sel.parentNode.removeChild(sel); };
+  sel.onchange = () => { it.complexity = sel.value; close(); renderRows(); update(); };
+  sel.onblur = close;
+  sel.onkeydown = e => { if (e.key === 'Escape') close(); };
   box.appendChild(sel); sel.focus(); try { sel.showPicker(); } catch {}
 }
 function nudge(inp, dir) {
