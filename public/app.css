@@ -121,3 +121,74 @@ input.pri { width:54px; }
 
 .deppop .dp-fb { display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; cursor:pointer; }
 .deprow label { display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; }
+
+
+/* ===== Design system: one type scale, one control size, consistent spacing =====
+   --fs-title 22 · --fs-lead 15 · --fs-body 13 · --fs-small 12.  Data never exceeds body size; headings are always larger or bolder than the data under them. */
+:root {
+  --fs-title:22px; --fs-lead:15px; --fs-body:13px; --fs-small:12px;
+  --ctl-h:30px; --radius:10px; --gap:12px;
+  --shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.05);
+  --font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+}
+html { -webkit-text-size-adjust:100%; }
+body { font:400 var(--fs-body)/1.45 var(--font); -webkit-font-smoothing:antialiased; letter-spacing:.005em; }
+.wrap { padding:16px 20px 32px; gap:var(--gap); max-width:1800px; margin:0 auto; }
+h1 { font-size:var(--fs-title); font-weight:700; letter-spacing:-.01em; }
+.top { gap:12px 24px; padding-bottom:2px; }
+#summary { font-size:var(--fs-body); color:var(--muted); } #summary b { color:var(--text); font-weight:600; }
+#saved { font-size:var(--fs-small); min-width:44px; text-align:right; }
+.hint, .legend { font-size:var(--fs-small); line-height:1.45; }
+.card { border-radius:var(--radius); padding:16px 18px; box-shadow:var(--shadow); }
+
+/* controls: identical height and text size everywhere */
+input, select, button { font-size:var(--fs-body); font-family:inherit; min-height:var(--ctl-h); padding:4px 10px; border-radius:7px; line-height:1.2; }
+button.ghost { min-height:26px; padding:2px 8px; }
+button.primary { font-weight:600; }
+button { transition:border-color .12s, background .12s; }
+input[type=number] { width:68px; }
+.ctl.big input { font-size:var(--fs-body); font-weight:600; }
+
+/* tabs */
+.tabs { padding:3px; border-radius:9px; }
+.tabs button { min-height:28px; padding:3px 16px; font-size:var(--fs-body); font-weight:500; }
+
+/* header settings bar */
+.capbar { gap:14px 32px; padding:14px 18px; }
+.setting .sh label { font-size:var(--fs-body); font-weight:600; }
+.setting .hint { margin:6px 0 0; }
+.step button { min-height:var(--ctl-h); }
+
+/* setup rows */
+.row > .lbl { font-size:var(--fs-lead); font-weight:600; width:130px; }
+.row .help { padding-left:140px; }
+.chip { min-height:var(--ctl-h); font-size:var(--fs-body); }
+.chip input[type=text], .chip input[type=number] { min-height:0; font-size:var(--fs-body); }
+.chip .tools button, .chip.eng .by, .chip .stagenum { font-size:var(--fs-small); }
+.sizes .chip span { font-size:var(--fs-body); }
+.smetag { font-size:10px; }
+
+/* tables */
+.toolbar { gap:8px 10px; margin-bottom:12px; }
+table { font-size:var(--fs-body); }
+th { font-size:var(--fs-body); font-weight:600; color:var(--text); padding:8px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+td { font-size:var(--fs-body); padding:5px 8px; }
+td input[type=text], td select, td input[type=number] { font-size:var(--fs-body); }
+td.num, td.calc { font-size:var(--fs-small); }
+tbody tr:hover td { background:color-mix(in srgb, var(--accent) 4%, transparent); }
+.dgrid label { font-size:var(--fs-small); }
+
+/* gantt card chrome */
+.gcard .toolbar .hint, .gcard label.hint { font-size:var(--fs-small); }
+.gflex { border-radius:8px; overflow:hidden; }
+.legend { gap:8px 18px; margin-top:12px; }
+
+/* dialogs + popups */
+dialog { font-size:var(--fs-body); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+dialog h3 { font-size:var(--fs-lead); }
+dialog .preview { font-size:var(--fs-small); }
+.cxpick { font-size:var(--fs-body); }
+.deppop { font-size:var(--fs-body) !important; }
+.deppop select, .deppop .dp-fb, .deprow label { font-size:var(--fs-small); }
+input[type=checkbox], input[type=radio], input[type=range] { min-height:0; padding:0; accent-color:var(--accent); }
+label.hint { display:inline-flex; align-items:center; gap:6px; }

@@ -724,7 +724,7 @@ document.addEventListener('mousedown', e => {   // clicking away drops the selec
 /* ---- Gantt: one SVG design used for both screen and PNG export ---- */
 const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
-const RH = 24, HH = 44, DAYMS = 86400000;
+const RH = 28, HH = 48, DAYMS = 86400000;
 // Mouse-over explanations for the table columns (Gantt header and Use cases table).
 const COLHELP = {
   id: 'SharePoint ID of the use case (or its row number if it has none). Click the ID or name to open the SharePoint item.',
@@ -742,7 +742,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 84, dur: 66, start: 88, end: 88 };
+const DEF_COLW = { id: 60, name: 230, stage: 176, pri: 44, cx: 96, sme: 64, reuse: 60, dep: 92, dur: 74, start: 96, end: 96 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -781,7 +781,7 @@ function resolveBase(base, id) {
 // A use case's own URL wins; otherwise base URL + SharePoint ID.
 const itemUrl = it => safeUrl(it.url) || resolveBase(state.config.spLinkBase, it.spId);
 const safeUrl = u => { try { const x = new URL(String(u || '').trim()); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
-const clip = (t, w) => { t = String(t); const n = Math.floor(w / 6.2); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const clip = (t, w) => { t = String(t); const n = Math.floor(w / 6.7); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const shortDate = d => fmt(typeof d === 'string' ? d : Scheduler.fmtDate(d));
 
 function layout(exportW) {
@@ -818,7 +818,7 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
   const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
@@ -832,7 +832,7 @@ function leftSVG(L, ui = true) {
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = r.triage && k === 2;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="12" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
@@ -856,11 +856,11 @@ function rightSVG(L) {
   for (let d = new Date(L.t0); d < L.t1;) {
     const y = d.getUTCFullYear(), m = d.getUTCMonth(), nx = new Date(Date.UTC(y, m + 1, 1));
     const x1 = L.X(d), x2 = L.X(nx), isQ = m % 3 === 0;
-    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="10.5" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
+    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="11" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
     grid += `<line x1="${x1}" x2="${x1}" y1="${isQ ? 0 : HH / 2}" y2="${H}" stroke="${isQ ? '#8b95a1' : '#e2e5ea'}"/>`;
     if (isQ) {
       const q2 = L.X(new Date(Date.UTC(y, m + 3, 1)));
-      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="11" font-weight="600" text-anchor="middle" fill="#1c2430">Q${m / 3 + 1} ${y}</text>`;
+      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="12" font-weight="600" text-anchor="middle" fill="#1c2430">Q${m / 3 + 1} ${y}</text>`;
     }
     d = nx;
   }
@@ -880,11 +880,11 @@ function rightSVG(L) {
       if (b.type === 'queue') o += `<g>${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
       else if (b.type === 'triage') {
         o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
-        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
+        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
         o += '</g>';
       } else {
         o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
-        if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
+        if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
         o += '</g>';
       }
     });
@@ -904,7 +904,7 @@ function rightSVG(L) {
     const now = Date.now();
     if (now >= L.t0 && now <= L.t1) {
       const x = L.X(now), lab = 'Today ' + shortDate(new Date(now));
-      o += `<line x1="${x}" x2="${x}" y1="${HH}" y2="${H}" stroke="#d93025" stroke-width="1.5"/><rect x="${x - 34}" y="${HH + 1}" width="68" height="14" rx="3" fill="#d93025"/><text x="${x}" y="${HH + 11.5}" font-size="9.5" text-anchor="middle" fill="#fff" font-weight="600">Today</text>`;
+      o += `<line x1="${x}" x2="${x}" y1="${HH}" y2="${H}" stroke="#d93025" stroke-width="1.5"/><rect x="${x - 34}" y="${HH + 1}" width="68" height="14" rx="3" fill="#d93025"/><text x="${x}" y="${HH + 11.5}" font-size="10.5" text-anchor="middle" fill="#fff" font-weight="600">Today</text>`;
     }
   }
   return o;
