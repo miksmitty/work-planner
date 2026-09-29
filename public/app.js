@@ -62,17 +62,18 @@ function bind() {
   $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
   const g = $('#gantt');
   g.addEventListener('mousedown', e => {
-    if (!e.target.closest('[data-resize]')) return;
+    const hd = e.target.closest('[data-resize]'); if (!hd) return;
     e.preventDefault();
-    const x0 = e.clientX, w0 = NAME_W; let raf = 0;
-    const mv = ev => { NAME_W = Math.min(700, Math.max(90, w0 + ev.clientX - x0)); cancelAnimationFrame(raf); raf = requestAnimationFrame(renderGantt); };
-    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); lsSet('nameW', NAME_W); };
+    const key = hd.dataset.resize, x0 = e.clientX, w0 = COLW[key]; let raf = 0;
+    const mv = ev => { COLW[key] = Math.min(COL_MAX, Math.max(COL_MIN, Math.round(w0 + ev.clientX - x0))); cancelAnimationFrame(raf); raf = requestAnimationFrame(renderGantt); };
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); saveColW(); };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   });
-  g.addEventListener('dblclick', e => {
-    if (!e.target.closest('[data-resize]')) return;
-    const longest = Math.max(...plan.rows.map(r => r.name.length), 9);
-    NAME_W = Math.min(700, Math.max(90, Math.round(longest * 6.3 + 16))); lsSet('nameW', NAME_W); renderGantt();
+  g.addEventListener('dblclick', e => {   // fit the column to its widest content
+    const hd = e.target.closest('[data-resize]'); if (!hd) return;
+    const key = hd.dataset.resize, k = cols().findIndex(c => c[0] === key);
+    const longest = Math.max(cols()[k][2].length * 1.1, ...leftRows(true).map(r => String(r.vals[k]).length));
+    COLW[key] = Math.min(COL_MAX, Math.max(COL_MIN, Math.round(longest * 6.3 + 16))); saveColW(); renderGantt();
   });
   g.addEventListener('click', e => { const c = e.target.closest('[data-pick]'); if (c) pickField(c); });
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
@@ -84,6 +85,7 @@ function bind() {
   try { if (localStorage.getItem('todayLine') === '0') $('#today').checked = false; } catch {}
   $('#today').onchange = () => { try { localStorage.setItem('todayLine', $('#today').checked ? '1' : '0'); } catch {} renderGantt(); };
   $('#png').onclick = downloadPNG;
+  $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; saveColW(); renderGantt(); };
   $('#add').onclick = () => { state.items.push(newItem('New use case')); renderRows(); update(); };
   $('#import').onclick = openImport;
   $('#bulk').onclick = () => {
@@ -462,8 +464,20 @@ function update() {
 const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
-let NAME_W = Math.min(700, Math.max(90, Number(lsGet('nameW')) || 206));
-const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['sme', 54, 'SME req'], ['reuse', 50, 'Reuse'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
+// Timeline table columns: every width is draggable and remembered in this browser.
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dur: 66, start: 88, end: 88 };
+const COL_MIN = 30, COL_MAX = 700;
+function loadColW() {
+  let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
+  const legacy = Number(lsGet('nameW')); if (legacy && saved.name == null) saved.name = legacy;   // older single-column setting
+  const out = { ...DEF_COLW };
+  for (const k in out) { const v = Number(saved[k]); if (v >= COL_MIN && v <= COL_MAX) out[k] = v; }
+  return out;
+}
+let COLW = loadColW();
+const saveColW = () => lsSet('colW', JSON.stringify(COLW));
+const cols = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
+  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -499,12 +513,8 @@ function layout(exportW) {
   return { ppd, start, t0, t1, X, XW: w => X(start.getTime() + w * 7 * DAYMS), width: Math.ceil(X(t1)), height: HH + (plan.rows.length + 1) * RH };
 }
 
-function leftSVG(L, ui = true) {
-  const H = L.height; let o = `<rect width="${lw()}" height="${H}" fill="#fff"/><rect width="${lw()}" height="${HH}" fill="#e9edf3"/>`;
-  let x = 0; const xs = [];
-  cols().forEach((c, ci) => { xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${c[2]}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
-    if (ui && c[0] === 'name') o += `<rect data-resize x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
-  });
+// Row data for the left-hand table (text of every cell, before clipping).
+function leftRows(ui = true) {
   const byId = Object.fromEntries(state.items.map(it => [it.id, it]));
   const cxName = k => (state.config.complexities.find(c => c.key === k) || {}).name || '';
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
@@ -512,25 +522,34 @@ function leftSVG(L, ui = true) {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
       return { itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
-  rows.forEach((r, i) => {
-    const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
-    o += `<line x1="0" x2="${lw()}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
-    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
+  return rows.map((r, i) => {
+    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; }
-    vals.forEach((v, k) => {
+    return { ...r, vals };
+  });
+}
+function leftSVG(L, ui = true) {
+  const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
+  let x = 0; const xs = [], cs = cols();
+  cs.forEach(c => {
+    xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
+  });
+  leftRows(ui).forEach((r, i) => {
+    const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
+    o += `<line x1="0" x2="${W}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
+    r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = r.triage && k > 1;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cols()[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : t;
     });
     if (ui && i > 0) {
-      o += `<rect data-pick="stage" data-id="${esc(r.itemId)}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change stage</title></rect>`;
-      o += `<rect data-pick="cx" data-id="${esc(r.itemId)}" x="${xs[4]}" y="${y}" width="${cols()[4][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
-      o += `<rect data-pick="sme" data-id="${esc(r.itemId)}" x="${xs[5]}" y="${y}" width="${cols()[5][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change SME required (H / M / L)</title></rect>`;
-      o += `<rect data-pick="reuse" data-id="${esc(r.itemId)}" x="${xs[6]}" y="${y}" width="${cols()[6][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change reuse of existing components (H / M / L)</title></rect>`;
+      const hit = (kind, k, tip) => `<rect data-pick="${kind}" data-id="${esc(r.itemId)}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>${tip}</title></rect>`;
+      o += hit('stage', 2, 'Change stage') + hit('cx', 4, 'Change complexity') + hit('sme', 5, 'Change SME required (H / M / L)') + hit('reuse', 6, 'Change reuse of existing components (H / M / L)');
     }
   });
-  return `<line x1="0" x2="${lw()}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
+  return `<line x1="0" x2="${W}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
 }
 
 function rightSVG(L) {

@@ -31,7 +31,7 @@ npm run start:fresh    # or use "Reset to test data" on the Use cases tab
 - Standard techniques: three-point (PERT) estimating, resource-constrained scheduling, a WIP limit, a Brooks'-law team-overhead penalty, and a Monte Carlo forecast (50 / 80 / 90% dates).
 - Gantt with quarter and month grid, today line, fit-to-width, and PNG download for slides.
 - Import use cases from a SharePoint list export (CSV), including stage/status and priority, keeping the SharePoint ID and a link back to each item. A use case with no URL of its own gets one built from the base URL (Setup tab) + its ID.
-- Change a use case's complexity straight from the Gantt (click the Complexity cell); drag the Task name column edge to resize it (double-click to fit).
+- Change a use case's complexity straight from the Gantt (click the Complexity cell); drag any column edge in the table header to resize it (double-click to fit that column, "Reset columns" to restore defaults).
 - All dates are shown as dd-mmm-yyyy (date boxes also accept d/m/yyyy).
 
 See `sample-sharepoint-export.csv` for an example import file.
