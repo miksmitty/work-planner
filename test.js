@@ -12,7 +12,7 @@ function state(devs, items) {
   s.config.teamOverhead = 0;
   s.config.wipLimit = 0;
   s.config.complexities.forEach(c => { c.min = c.max = c.effort; });
-  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null, sme: null, reuse: null, buildsOn: null, sme: null,
+  s.items = items.map((c, i) => ({ id: 'x' + i, name: 'x' + i, complexity: c, stage: 'ideation', priority: i + 1, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], sme: null,
     teamCap: null, effortOverride: null, earliestStart: null, overrides: {} }));
   return s;
 }
@@ -217,6 +217,46 @@ const noreuse = defaultState(); delete noreuse.config.reuseFactors; noreuse.conf
 schedule(noreuse);
 assert.deepStrictEqual(noreuse.config.reuseFactors, { H: 0.5, M: 0.7, L: 0.85 });
 assert.ok(noreuse.config.stages.find(s => s.id === 'eng').reuse && !noreuse.config.stages.find(s => s.id === 'discovery').reuse);
+
+/* ---- dependencies (finish-to-start) ---- */
+const startOf = (r, id) => { const x = row(r, id); const b = x.bars.find(b => b.type === 'stage'); return b ? b.start : null; };
+c = state(8, ['low', 'low']); c.config.wipLimit = 0;
+r = schedule(c);
+assert.strictEqual(startOf(r, 'x1'), 0);                                    // independent: both start together
+c.items[1].dependsOn = [{ id: 'x0', until: null }];
+r = schedule(c);
+assert.ok(Math.abs(startOf(r, 'x1') - Math.ceil(row(r, 'x0').end)) < 1e-9);  // starts after x0 fully finishes
+assert.ok(row(r, 'x1').bars.some(b => b.key === 'depwait'));
+assert.strictEqual(r.links.length, 1);
+assert.strictEqual(r.links[0].from, 'x0'); assert.strictEqual(r.links[0].to, 'x1');
+// ...or after just one stage completes (Build): starts earlier than waiting for the whole finish
+c.items[1].dependsOn = [{ id: 'x0', until: 'eng' }];
+const afterBuild = startOf(schedule(c), 'x1');
+assert.ok(afterBuild < startOf(r, 'x1') && afterBuild >= eng(row(schedule(c), 'x0')).end);
+c.items[1].dependsOn = [{ id: 'x0', until: 'discovery' }];
+assert.ok(startOf(schedule(c), 'x1') >= 4 && startOf(schedule(c), 'x1') < afterBuild);   // ideation 2 + discovery 2
+// Several predecessors: waits for the slowest
+c = state(8, ['low', 'high', 'low']); c.config.wipLimit = 0;
+c.items[2].dependsOn = [{ id: 'x0', until: null }, { id: 'x1', until: null }];
+r = schedule(c);
+assert.ok(startOf(r, 'x2') >= Math.max(row(r, 'x0').end, row(r, 'x1').end) - 1e-9);
+// Already-in-flight predecessor beyond the stage: dependency met immediately
+c = state(8, ['low', 'low']); c.items[0].stage = 'operate'; c.items[0].stageStart = '2025-12-01';   // finished before the plan starts
+c.items[1].dependsOn = [{ id: 'x0', until: null }];
+assert.strictEqual(startOf(schedule(c), 'x1'), 0);
+// Circular dependencies are ignored and flagged (no hang)
+c = state(8, ['low', 'low']); c.items[0].dependsOn = [{ id: 'x1', until: null }]; c.items[1].dependsOn = [{ id: 'x0', until: null }];
+r = schedule(c);
+assert.strictEqual(r.unscheduled, 0); assert.strictEqual(row(r, 'x0').depIssue, 'circular'); assert.strictEqual(startOf(r, 'x0'), 0);
+// Missing predecessor / self link ignored; a triage predecessor is predicted, so the successor waits for it
+c = state(8, ['low', 'low']); c.items[0].dependsOn = [{ id: 'nope', until: null }, { id: 'x0', until: null }];
+assert.strictEqual(startOf(schedule(c), 'x0'), 0);
+c = state(8, ['low', 'low']); c.items[0].stage = TRIAGE; c.items[1].dependsOn = [{ id: 'x0', until: null }];
+r = schedule(c); assert.ok(startOf(r, 'x1') >= row(r, 'x0').end - 1e-9 && r.unscheduled === 0);
+// A dependency never shortens the plan
+c = state(8, ['low', 'low']); const free = schedule(c).totalWeeks; c.items[1].dependsOn = [{ id: 'x0', until: null }]; assert.ok(schedule(c).totalWeeks >= free);
+// Old data without dependsOn is fine
+const nodep = defaultState(); nodep.items.forEach(i => delete i.dependsOn); schedule(nodep); assert.ok(nodep.items.every(i => Array.isArray(i.dependsOn)));
 
 // Monte Carlo: ordered percentiles, reproducible, ignores triage rows.
 const d = defaultState();

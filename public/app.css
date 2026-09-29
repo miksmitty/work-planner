@@ -105,3 +105,6 @@ input.pri { width:54px; }
 #reusef input { width:60px; }
 
 #gantt:focus { outline:none; }
+
+.deprow { display:flex; gap:8px; align-items:center; margin:3px 0; } .deprow select { max-width:340px; }
+.depbox button[data-dadd] { margin-top:4px; }

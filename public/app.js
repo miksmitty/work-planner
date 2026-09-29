@@ -158,7 +158,7 @@ const reuseOptions = sel => `<option value="" ${!sel ? 'selected' : ''}>–</opt
 const stageOptions = sel => `<option value="${TRIAGE}" ${sel === TRIAGE ? 'selected' : ''}>0. Stakeholder Triage</option>` +
   state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('');
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
-  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
 
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
@@ -269,6 +269,21 @@ function renderRows() {
     if (open.has(it.id)) tb.appendChild(detailsRow(it));
   });
 }
+// Dependencies: finish-to-start links. "Until" = the predecessor's finish, or completion of one of its stages.
+function renderDeps(box, it) {
+  const others = Scheduler.orderItems(state).filter(o => o.id !== it.id);
+  const label = o => (o.spId ? o.spId + ' · ' : '') + o.name;
+  const stageOpts = sel => `<option value="" ${!sel ? 'selected' : ''}>finishes (whole use case)</option>` +
+    state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>completes ${i + 1}. ${esc(s.name)}</option>`).join('');
+  box.innerHTML = `<div class="hint" style="margin:8px 0 4px" title="Finish-to-start: this use case cannot start until every use case listed here has reached the point you choose. Circular links are ignored."><b>Depends on</b> (this use case can't start until each of these …)</div>` +
+    it.dependsOn.map((d, i) => `<div class="deprow"><select data-di="${i}" data-dk="id" title="Predecessor use case">${others.some(o => o.id === d.id) ? '' : `<option value="${esc(d.id)}" selected>(missing use case)</option>`}${others.map(o => `<option value="${esc(o.id)}" ${o.id === d.id ? 'selected' : ''}>${esc(label(o))}</option>`).join('')}</select>
+      <select data-di="${i}" data-dk="until" title="What the predecessor must complete first">${stageOpts(d.until)}</select><button class="ghost" data-dx="${i}" title="Remove this dependency">✕</button></div>`).join('') +
+    `<button data-dadd ${others.length ? '' : 'disabled'}>+ Add dependency</button>`;
+  box.querySelectorAll('select[data-dk]').forEach(el => el.onchange = () => { it.dependsOn[Number(el.dataset.di)][el.dataset.dk] = el.value || null; update(); });
+  box.querySelectorAll('[data-dx]').forEach(b => b.onclick = () => { it.dependsOn.splice(Number(b.dataset.dx), 1); renderDeps(box, it); update(); });
+  const add = box.querySelector('[data-dadd]');
+  if (add) add.onclick = () => { it.dependsOn.push({ id: others[0].id, until: null }); renderDeps(box, it); update(); };
+}
 function detailsRow(it) {
   const tr = document.createElement('tr'); tr.className = 'details';
   const fixed = state.config.stages.filter(s => s.kind !== 'eng');
@@ -282,7 +297,8 @@ function detailsRow(it) {
     <label title="Most developers on this use case at once. Blank = use the global Max per use case.">Max devs <input type="number" min="0.5" step="0.5" data-k="teamCap" placeholder="default" value="${it.teamCap ?? ''}"></label>
     <label title="Earliest date this use case may start. Blank = as soon as a slot is free.">Not before <input type="text" class="dateinp" data-d="earliestStart" placeholder="dd-mmm-yyyy"></label>
     ${fixed.map(s => `<label title="Weeks for this stage on this use case only. Blank = the stage default (${s.weeks}).">${esc(s.name)} wks <input type="number" min="0" data-s="${s.id}" placeholder="${s.weeks}" value="${it.overrides[s.id] ?? ''}"></label>`).join('')}
-  </div><div class="hint">Overrides apply to this use case only. Leave a box empty to use the default shown in grey.</div></td>`;
+  </div><div class="depbox"></div><div class="hint">Overrides apply to this use case only. Leave a box empty to use the default shown in grey.</div></td>`;
+  renderDeps(tr.querySelector('.depbox'), it);
   tr.querySelectorAll('[data-b]').forEach(el => el.onchange = () => { it.buildsOn = el.value || null; update(); });
   tr.querySelectorAll('[data-d]').forEach(el => bindDate(el, () => it[el.dataset.d], iso => { it[el.dataset.d] = iso || null; update(); }));
   tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.value.trim() || null; update(); });
@@ -460,7 +476,8 @@ function update() {
     { const td = tr.querySelector('[data-c=eng]');
       if (r.reuseApplied) { td.textContent += ` · reuse saves ${wk(r.reuseSaved)} dev-wks`; td.title = 'Reuse of existing components reduced Build effort'; }
       else if (r.reusePending) { td.textContent += ' · reuse pending'; td.title = 'Builds on a use case whose Build is not finished when this one starts, so no reuse saving yet'; }
-      else td.title = ''; }
+      else td.title = '';
+      if (r.depIssue) { td.textContent += ' · dependency ignored (circular)'; td.title = 'This use case is part of a circular dependency, so its dependencies are ignored'; } }
     tr.querySelector('[data-c=end]').textContent = r.endDate ? (r.triage ? '~' : '') + fmt(r.endDate) : '—';
     const f = fc && fc.rows[r.id]; tr.querySelector('[data-c=p80]').textContent = f ? fmt(f.p80Date) : '—';
   });
@@ -647,6 +664,7 @@ const COLHELP = {
   cx: 'Complexity of the use case. It sets the Build effort in developer-weeks (see Engineering size on the Setup tab).',
   sme: 'SME required: how much subject-matter-expert time the use case needs (H / M / L). Higher stretches the SME-flagged stages.',
   reuse: 'Reuse: how much of the plumbing already exists from earlier deliveries (H / M / L). Higher reduces Build effort.',
+  dep: 'Depends on: use cases (by ID) that must finish first before this one can start (finish-to-start). Set them under "details" on the Use cases tab. Grey arrows in the chart show each link.',
   dur: 'Predicted elapsed weeks from when work starts to when the use case finishes.',
   start: 'Predicted date work starts (the first stage after any triage period). ~ marks a tentative date for a use case still in Stakeholder Triage.',
   end: 'Predicted finish date at the end of the last stage. ~ marks a tentative date for a use case still in Stakeholder Triage.',
@@ -654,7 +672,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dur: 66, start: 88, end: 88 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 66, dur: 66, start: 88, end: 88 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -666,7 +684,7 @@ function loadColW() {
 let COLW = loadColW();
 const saveColW = () => lsSet('colW', JSON.stringify(COLW));
 const cols = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
-  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish']];
+  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -709,10 +727,12 @@ function leftRows(ui = true) {
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
     .concat(plan.rows.map((r, i) => {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
-      return { itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
+      const idText = id => { const o = byId[id], p = plan.rows.findIndex(x => x.id === id); return o ? (o.spId || String(p + 1)) : '?'; };
+      const deps = (it.dependsOn || []);
+      return { dep: deps.map(d => idText(d.id)).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
   return rows.map((r, i) => {
-    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
+    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; }
     return { ...r, vals };
   });
@@ -736,7 +756,7 @@ function leftSVG(L, ui = true) {
       const linked = r.url && k < 2 && v !== '';
       const dim = r.triage && k === 2;
       const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
-      o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : t;
+      o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
       const hit = (kind, k) => `<rect data-cell data-ci="${k}" data-p="${i - 1}" data-id="${esc(r.itemId)}" data-pick="${kind}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Click to change · drag to select a range (then Ctrl/Cmd+C, Ctrl/Cmd+V) · shift-click extends</title></rect>`;
@@ -796,6 +816,12 @@ function rightSVG(L) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;
       o += `<g><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5f6b7a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5f6b7a"/></g>`;
     }
+  });
+  // dependency arrows (predecessor's completion point -> successor's start)
+  (plan.links || []).forEach(l => {
+    const pf = plan.rows.findIndex(r => r.id === l.from), pt = plan.rows.findIndex(r => r.id === l.to); if (pf < 0 || pt < 0) return;
+    const y1 = HH + (pf + 1) * RH + RH / 2, y2 = HH + (pt + 1) * RH + RH / 2, x1 = L.XW(l.at), x2 = L.XW(l.toStart), xm = x1 + Math.min(6, Math.max(2, (x2 - x1) / 2));
+    o += `<g><title>Dependency: ${esc(plan.rows[pt].name)} starts after ${esc(plan.rows[pf].name)}</title><path d="M${x1},${y1} H${xm} V${y2} H${x2 - 1}" fill="none" stroke="#5f6b7a" stroke-width="1.2" opacity=".9"/><polygon points="${x2},${y2} ${x2 - 5},${y2 - 3} ${x2 - 5},${y2 + 3}" fill="#5f6b7a"/></g>`;
   });
   if (showToday()) {
     const now = Date.now();

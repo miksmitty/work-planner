@@ -8,6 +8,7 @@
 //   - Brooks' law: a use case with several developers loses `teamOverhead` of throughput per
 //     extra developer, so effort (dev-weeks) and duration are not interchangeable.
 //   - Reuse: a rating (and optional "builds on" link) reduces the effort of reuse-flagged stages (Build by default).
+//   - Dependencies: a use case can depend (finish-to-start) on others, optionally until a given stage completes.
 //   - WIP limit: at most `wipLimit` use cases in flight at once (no multitasking / Little's law).
 //   - Monte Carlo forecast: sample effort from a PERT-beta distribution, re-run the plan many
 //     times, report P50/P80/P90 completion.
@@ -49,6 +50,7 @@
         complexity: ['low', 'medium', 'medium', 'high', 'very high'][(i * 7) % 5],
         stage: stagePlan[i - 1], priority: i, stageStart: null, sme: ['H', 'M', 'L', 'M', 'H', null][i % 6],
         reuse: [null, 'M', 'H', null, 'L', 'H'][i % 6], buildsOn: i === 5 ? 'uc1' : i === 6 ? 'uc2' : i === 9 ? 'uc3' : null,
+        dependsOn: i === 10 ? [{ id: 'uc2', until: 'eng' }] : i === 12 ? [{ id: 'uc7', until: null }] : [],
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {},
       });
     }
@@ -115,6 +117,8 @@
       if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
       if (!it.buildsOn) it.buildsOn = null;
+      // dependsOn: [{ id, until }] - finish-to-start; `until` = a stage id the predecessor must complete (null = its finish)
+      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null }));
     });
     return state;
   }
@@ -187,6 +191,7 @@
       return {
         item: it, cur, triage, triageW, durOf, pastEng, effort, effortBase: effort, reuseOnEffort, reuseApplied: false, dep: it.buildsOn || null,
         cap, remaining: effort, earliest,
+        deps: (it.dependsOn || []).filter(d => d.id !== it.id), depCycle: false, depAt: 0,
         forced: !triage && (cur > 0 || !!it.stageStart),   // already under way: never held back by the WIP limit
         pre: hasEng ? sumDur(cur, engIdx) : 0,
         post: engIdx < 0 ? 0 : sumDur(Math.max(cur, engIdx + 1), stages.length),
@@ -195,6 +200,25 @@
     });
     const active = rows;   // triage rows are predicted too (they enter after their triage period, behind everything else)
     const rowById = Object.fromEntries(rows.map(r => [r.item.id, r]));
+    // Dependencies (finish-to-start). A link to a missing use case is ignored; circular links are ignored and flagged.
+    rows.forEach(r => { r.deps = r.deps.filter(d => rowById[d.id]); });
+    rows.forEach(r => {
+      const seen = new Set(), stack = r.deps.map(d => d.id);
+      while (stack.length) { const id = stack.pop(); if (id === r.item.id) { r.depCycle = true; break; } if (seen.has(id)) continue; seen.add(id); rowById[id].deps.forEach(d => stack.push(d.id)); }
+    });
+    rows.forEach(r => { if (r.depCycle) r.deps = []; });
+    // When does row p finish stage k (in weeks)? null = not known yet.
+    const stageEndOf = (p, k) => {
+      if (p.cur > k) return 0;                 // already past that stage when the plan starts
+      if (!p.started) return null;
+      let t = p.startWk;
+      for (let i = p.cur; i <= k; i++) {
+        if (i === engIdx) { if (p.engEnd === null) return null; t = p.engEnd; } else t += p.durOf(stages[i], i);
+      }
+      return t;
+    };
+    const depEnd = d => { const k = d.until ? stages.findIndex(s => s.id === d.until) : stages.length - 1; return stageEndOf(rowById[d.id], k < 0 ? stages.length - 1 : k); };
+    const depsMet = (r, t) => r.deps.every(d => { const e = depEnd(d); return e !== null && e <= t + 1e-9; });
 
     if (engIdx < 0) {
       active.forEach(r => { r.started = true; r.startWk = r.earliest; });
@@ -202,13 +226,14 @@
       const eff = a => Math.max(0.3, 1 - overhead * Math.max(0, a - 1));
       const begin = (r, t, inflight) => {
         r.started = true; r.startWk = t; r.readyAt = t + r.pre;
+        r.depAt = r.deps.reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
         if (r.effort <= 1e-9) { r.engStart = r.engEnd = r.readyAt; r.finish = r.engEnd + r.post; }
       };
       for (let t = 0; t < 1000 && active.some(r => r.finish === null); t++) {
         let inflight = active.filter(r => r.started && (r.finish === null || r.finish > t)).length;
         for (const r of active) if (!r.started && r.forced && r.earliest <= t) { begin(r, t); inflight++; }
         for (const r of active) {
-          if (r.started || r.earliest > t || (wip && inflight >= wip)) continue;
+          if (r.started || r.earliest > t || !depsMet(r, t) || (wip && inflight >= wip)) continue;
           begin(r, t); inflight++;
         }
         let free = pool;
@@ -245,7 +270,12 @@
       let t = r.startWk ?? r.earliest;
       if (r.triage && r.triageW > 0) bars.push({ key: 'triage', stageId: null, name: 'Stakeholder Triage (estimated)', type: 'triage', start: 0, end: r.triageW });
       const waitFrom = r.triage ? r.triageW : r.earliest;
-      if (r.started && r.startWk > waitFrom) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: waitFrom, end: r.startWk });
+      if (r.started && r.startWk > waitFrom + 1e-9) {
+        const depTo = Math.min(r.startWk, r.depAt);   // part of the wait that is a dependency, then any wait for capacity
+        if (depTo > waitFrom + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: waitFrom, end: depTo });
+        const from = Math.max(waitFrom, depTo);
+        if (r.startWk > from + 1e-9) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: from, end: r.startWk });
+      }
       const push = (s, i, a, b) => { if (b > a) bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: a, end: b }); };
       if (r.started) for (let i = r.cur; i < stages.length; i++) {
         const s = stages[i];
@@ -268,12 +298,23 @@
         reusePending: r.reuseOnEffort !== 1 && !r.reuseApplied && r.effortBase > 0 && (r.engStart === null || !!r.dep),
         teamCap: r.cap, scheduled,
         queueWeeks: r.engStart !== null && r.readyAt !== Infinity ? r.engStart - r.readyAt : null,
-        bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest),
+        bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest), depIssue: r.depCycle ? 'circular' : null,
+        stageEnd: Object.fromEntries(bars.filter(b => b.type === 'stage').map(b => [b.stageId, b.end])),
         end: scheduled ? t : null, endDate: scheduled ? fmtDate(addWeeks(start, t)) : null,
       };
     });
 
+    // Arrows for the Gantt: predecessor's completion point -> successor's start.
+    const outById = Object.fromEntries(out.map(o => [o.id, o]));
+    const links = [];
+    rows.forEach(r => r.deps.forEach(d => {
+      const from = outById[d.id], to = outById[r.item.id];
+      if (!from || !to || !from.scheduled || !to.scheduled) return;
+      const at = d.until && from.stageEnd[d.until] != null ? from.stageEnd[d.until] : (d.until ? from.begin : from.end);
+      links.push({ from: d.id, to: r.item.id, at, toStart: to.begin });
+    }));
     return {
+      links,
       startDate: config.startDate, rows: out, totalWeeks: overallEnd,
       endDate: fmtDate(addWeeks(start, overallEnd)),
       totalEffort: rows.reduce((s, r) => s + r.effort, 0),
