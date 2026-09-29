@@ -74,7 +74,7 @@ function bind() {
     const longest = Math.max(...plan.rows.map(r => r.name.length), 9);
     NAME_W = Math.min(700, Math.max(90, Math.round(longest * 6.3 + 16))); lsSet('nameW', NAME_W); renderGantt();
   });
-  g.addEventListener('click', e => { const c = e.target.closest('[data-cx]'); if (c) pickComplexity(c); });
+  g.addEventListener('click', e => { const c = e.target.closest('[data-pick]'); if (c) pickField(c); });
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
   $('#fit').checked = lsGet('fit') !== '0';
   $('#fit').onchange = () => { lsSet('fit', $('#fit').checked ? '1' : '0'); renderGantt(); };
@@ -103,18 +103,19 @@ function bind() {
   });
   syncInputs();
 }
-// Inline complexity picker over a Gantt row.
-function pickComplexity(rect) {
+// Inline picker over a Gantt cell: stage or complexity.
+function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
-  const it = state.items[Number(rect.dataset.cx)]; if (!it) return;
+  const it = state.items.find(x => x.id === rect.dataset.id), kind = rect.dataset.pick; if (!it) return;
   const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
   const sel = document.createElement('select'); sel.className = 'cxpick';
   sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
-  sel.innerHTML = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  sel.innerHTML = kind === 'stage' ? stageOptions(it.stage)
+    : state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   // close() is safe to call more than once: removing a focused select fires blur, which calls it again.
   let closed = false;
   const close = () => { if (closed) return; closed = true; sel.onblur = null; if (sel.parentNode) sel.parentNode.removeChild(sel); };
-  sel.onchange = () => { it.complexity = sel.value; close(); renderRows(); update(); };
+  sel.onchange = () => { if (kind === 'stage') it.stage = sel.value; else it.complexity = sel.value; close(); renderRows(); update(); };
   sel.onblur = close;
   sel.onkeydown = e => { if (e.key === 'Escape') close(); };
   box.appendChild(sel); sel.focus(); try { sel.showPicker(); } catch {}
@@ -135,29 +136,38 @@ function syncInputs() {
   const c = state.config;
   $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#start').value = fmt(c.startDate); $('#spbase').value = c.spLinkBase || '';
 }
+const TRIAGE = Scheduler.TRIAGE;
+// "0. Stakeholder Triage" = clock not started; then the configured stages in order.
+const stageOptions = sel => `<option value="${TRIAGE}" ${sel === TRIAGE ? 'selected' : ''}>0. Stakeholder Triage</option>` +
+  state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('');
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
-  teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+  stage: state.config.stages[0]?.id, priority: null, stageStart: null, teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
 
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
   const st = state.config.stages, box = $('#stages'); box.innerHTML = '';
+  box.insertAdjacentHTML('beforeend', `<div class="chip triage" style="--c:#8a94a3" title="Use cases here have no clock and are not scheduled. Set a use case's stage to start its clock."><span class="stagenum">0</span><span class="tname">Stakeholder Triage</span><span class="by">clock not started</span></div><span class="arrow">→</span>`);
   st.forEach((s, i) => {
     const eng = s.kind === 'eng';
     const el = document.createElement('div'); el.className = 'chip' + (eng ? ' eng' : ''); el.style.setProperty('--c', color(i));
-    el.innerHTML = `<input type="text" value="${esc(s.name)}" aria-label="Stage name">
+    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">
       ${eng ? `<span class="by" title="Set by complexity and developers">by complexity</span>`
             : `<input type="number" min="0" step="1" value="${s.weeks ?? 0}" aria-label="Weeks"><span class="muted">wk</span>`}
       <span class="tools">
         <button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
         ${eng ? '' : `<button data-a="eng" title="Make this the engineering stage (length driven by complexity &amp; developers)">⚙</button><button data-a="del" title="Remove stage">✕</button>`}
       </span>`;
-    const [name, weeks] = el.querySelectorAll('input');
+    const [name, weeks] = el.querySelectorAll('input');   // number span is not an input
     name.oninput = () => { s.name = name.value; update(); };
     if (weeks) weeks.oninput = () => { s.weeks = Number(weeks.value); update(); };
     el.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
       const a = b.dataset.a;
       if (a === 'l' || a === 'r') { const k = i + (a === 'l' ? -1 : 1); if (k < 0 || k >= st.length) return; [st[i], st[k]] = [st[k], st[i]]; }
-      else if (a === 'del') { st.splice(i, 1); }
+      else if (a === 'del') {
+        st.splice(i, 1);
+        const fallback = (st[Math.max(0, i - 1)] || {}).id;   // use cases in the removed stage move back one stage
+        state.items.forEach(it => { if (it.stage === s.id) it.stage = fallback; if (it.overrides) delete it.overrides[s.id]; });
+      }
       else if (a === 'eng') { const old = st.find(x => x.kind === 'eng'); if (old) { delete old.kind; old.weeks = 2; } delete s.weeks; s.kind = 'eng'; }
       renderStages(); renderRows(); update();
     });
@@ -183,25 +193,33 @@ function renderSizes() {
 /* ---- use cases: simple row + optional details ---- */
 function renderRows() {
   const tb = $('#rows'); tb.innerHTML = '';
-  state.items.forEach((it, i) => {
+  Scheduler.orderItems(state).forEach((it, i) => {
     const tr = document.createElement('tr'); tr.dataset.id = it.id;
     const opts = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
     const link = itemUrl(it);
     tr.innerHTML = `<td class="num">${i + 1}</td>
       <td class="calc">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" title="Open in SharePoint">${esc(it.spId || 'link')} ↗</a>` : esc(it.spId || '')}</td>
       <td><input type="text" data-f="name" value="${esc(it.name)}"></td>
+      <td><select data-f="stage">${stageOptions(it.stage)}</select></td>
+      <td><input type="number" class="pri" min="1" step="1" data-f="priority" placeholder="–" value="${it.priority ?? ''}"></td>
       <td><select data-f="complexity">${opts}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
-        <button class="ghost" data-a="up" title="Higher priority">↑</button><button class="ghost" data-a="down" title="Lower priority">↓</button><button class="ghost" data-a="del" title="Delete">✕</button>
+        <button class="ghost" data-a="del" title="Delete">✕</button>
       </td>`;
-    tr.querySelectorAll('[data-f]').forEach(el => el.oninput = () => { it[el.dataset.f] = el.value; update(); });
+    tr.querySelectorAll('[data-f]').forEach(el => {
+      const f = el.dataset.f;
+      if (f === 'name') el.oninput = () => { it.name = el.value; update(); };
+      else el.onchange = () => {   // stage / priority / complexity change the sort order, so redraw the (re-sorted) list
+        it[f] = f === 'priority' ? num(el.value) : el.value;
+        renderRows(); update();
+      };
+    });
     tr.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
       const a = b.dataset.a, j = state.items.indexOf(it);
       if (a === 'details') { open.has(it.id) ? open.delete(it.id) : open.add(it.id); }
       else if (a === 'del') state.items.splice(j, 1);
-      else { const k = a === 'up' ? j - 1 : j + 1; if (k < 0 || k >= state.items.length) return; [state.items[j], state.items[k]] = [state.items[k], state.items[j]]; }
       renderRows(); update();
     });
     tb.appendChild(tr);
@@ -211,10 +229,11 @@ function renderRows() {
 function detailsRow(it) {
   const tr = document.createElement('tr'); tr.className = 'details';
   const fixed = state.config.stages.filter(s => s.kind !== 'eng');
-  tr.innerHTML = `<td></td><td colspan="7"><div class="dgrid">
+  tr.innerHTML = `<td></td><td colspan="9"><div class="dgrid">
     <label title="ID of the item in the SharePoint list">SharePoint ID <input type="text" data-t="spId" value="${esc(it.spId ?? '')}"></label>
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
-    <label title="Fixed engineering effort for this use case, replacing the estimate from its complexity. Blank = use complexity.">Engineering dev-weeks <input type="number" min="0" data-k="effortOverride" placeholder="auto" value="${it.effortOverride ?? ''}"></label>
+    <label title="Date this use case entered its current stage. Time already spent counts towards that stage's length (fixed-length stages only). Blank = starts fresh at the plan start.">In stage since <input type="text" class="dateinp" data-d="stageStart" placeholder="dd-mmm-yyyy"></label>
+    <label title="Developer-weeks of Build work still to do, replacing the estimate from complexity. Use this for a use case already part-way through Build. Blank = use complexity.">Build dev-weeks left <input type="number" min="0" data-k="effortOverride" placeholder="auto" value="${it.effortOverride ?? ''}"></label>
     <label title="Most developers on this use case at once. Blank = use the global Max per use case.">Max devs <input type="number" min="0.5" step="0.5" data-k="teamCap" placeholder="default" value="${it.teamCap ?? ''}"></label>
     <label title="Earliest date this use case may start. Blank = as soon as a slot is free.">Not before <input type="text" class="dateinp" data-d="earliestStart" placeholder="dd-mmm-yyyy"></label>
     ${fixed.map(s => `<label title="Weeks for this stage on this use case only. Blank = the stage default (${s.weeks}).">${esc(s.name)} wks <input type="number" min="0" data-s="${s.id}" placeholder="${s.weeks}" value="${it.overrides[s.id] ?? ''}"></label>`).join('')}
@@ -251,6 +270,8 @@ const GUESS = {
   name: /^(title|name|use ?case( ?name| ?title)?|project( ?name)?)$/i,
   complexity: /complex|t-?shirt|^size$/i,
   url: /url|link|href|item ?path/i,
+  stage: /stage|status|phase/i,
+  priority: /priorit|rank/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -260,6 +281,24 @@ function matchComplexity(val) {
     vh:3, xl:3, xlarge:3, 'extra large':3, 'very complex':3, '4':3 };
   return v in alias ? cxs[Math.min(alias[v], cxs.length - 1)].key : null;
 }
+// Stage: "0"/triage, "1".."n", or a stage name (case-insensitive, whole or partial).
+function matchStage(val) {
+  const v = String(val || '').trim().toLowerCase(); if (!v) return null;
+  if (v === '0' || /triage/.test(v)) return TRIAGE;
+  const st = state.config.stages;
+  if (/^\d+$/.test(v)) return (st[+v - 1] || {}).id || null;
+  const num = v.match(/^(\d+)[.)\s-]+/); if (num && st[+num[1] - 1]) return st[+num[1] - 1].id;
+  const name = v.replace(/^\d+[.)\s-]+/, '');
+  const hit = st.find(s => s.name.toLowerCase() === name) || st.find(s => s.name.toLowerCase().includes(name) || name.includes(s.name.toLowerCase()));
+  return hit ? hit.id : null;
+}
+// Priority: a number (lower = more important) or High / Medium / Low text ("(1) High" also works).
+function parsePriority(val) {
+  const v = String(val || '').trim().toLowerCase(); if (!v) return null;
+  const n = v.match(/-?\d+(\.\d+)?/); if (n) return Number(n[0]);
+  const w = { critical: 1, urgent: 1, high: 1, medium: 2, normal: 2, med: 2, low: 3 }; 
+  const k = Object.keys(w).find(x => v.includes(x)); return k ? w[k] : null;
+}
 function openImport() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,text/csv,.txt';
   inp.onchange = async () => { const f = inp.files[0]; if (f) showImport(parseCSV(await f.text()), f.name); };
@@ -267,8 +306,8 @@ function openImport() {
 }
 function planImport(rows, map, prefix, mode) {
   const head = rows[0], col = k => map[k] === '' ? -1 : head.indexOf(map[k]);
-  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url') };
-  const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set() };
+  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority') };
+  const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set(), unmatchedStage: new Set() };
   const seen = new Set();
   rows.slice(1).forEach(r => {
     const g = i => i < 0 ? '' : String(r[i] ?? '').replace(/\s+/g, ' ').trim();
@@ -277,8 +316,11 @@ function planImport(rows, map, prefix, mode) {
     const url = safeUrl(g(ci.url));  // only a URL the file supplies is stored; the base URL is applied live
     let cx = ci.cx >= 0 ? matchComplexity(g(ci.cx)) : null;
     if (ci.cx >= 0 && !cx && g(ci.cx)) out.unmatched.add(g(ci.cx));
+    let stage = ci.stage >= 0 ? matchStage(g(ci.stage)) : null;
+    if (ci.stage >= 0 && !stage && g(ci.stage)) out.unmatchedStage.add(g(ci.stage));
+    const priority = ci.pri >= 0 ? parsePriority(g(ci.pri)) : null;
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
-    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, existing });
+    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, existing });
     existing ? out.updates++ : out.adds++;
   });
   return out;
@@ -296,6 +338,8 @@ function showImport(rows, fileName) {
       <label>Name</label><select data-m="name">${opts(guess('name'))}</select>
       <label>Complexity</label><select data-m="complexity">${opts(guess('complexity'))}</select>
       <label>Item URL</label><select data-m="url">${opts(guess('url'))}</select>
+      <label title="Stakeholder Triage / 0, a stage number 1-${state.config.stages.length}, or a stage name">Stage / status</label><select data-m="stage">${opts(guess('stage'))}</select>
+      <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
       <label>If ID already exists</label>
@@ -308,9 +352,11 @@ function showImport(rows, fileName) {
   const preview = () => {
     const { map, prefix, mode } = read();
     const p = planImport(rows, map, prefix, mode === 'update' ? 'update' : 'add');
-    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
+    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.stage === TRIAGE ? 'Triage' : (state.config.stages.find(x => x.id === i.stage) || {}).name || 'first stage')} · P${i.priority ?? '–'} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
     dlg.querySelector('#imp-prev').innerHTML = `<b>${mode === 'replace' ? p.items.length + ' will replace all existing' : p.adds + ' new, ' + p.updates + ' updated'}</b>${p.skipped ? ` · ${p.skipped} blank rows skipped` : ''}` +
       (!map.name ? `<div class="warn">Choose a Name column.</div>` : '') +
+      (p.unmatchedStage.size ? `<div class="warn">Unrecognised stage (will use ${esc(state.config.stages[0]?.name || 'first stage')}): ${[...p.unmatchedStage].slice(0, 8).map(esc).join(', ')}</div>` : '') +
+      (!map.stage ? `<div class="muted">No stage column chosen: new use cases start at ${esc(state.config.stages[0]?.name || 'the first stage')}.</div>` : '') +
       (p.unmatched.size ? `<div class="warn">Unrecognised complexity (will use ${esc(state.config.complexities[1]?.name || 'default')}): ${[...p.unmatched].slice(0, 8).map(esc).join(', ')}</div>` : '') + `<div class="muted" style="margin-top:6px">${sample}</div>`;
   };
   dlg.addEventListener('input', preview); dlg.addEventListener('change', preview); preview();
@@ -324,8 +370,8 @@ function showImport(rows, fileName) {
     if (mode === 'replace') state.items = [];
     const dflt = state.config.complexities[1]?.key || state.config.complexities[0].key;
     p.items.forEach(i => {
-      if (i.existing) { i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; return; }
-      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt,
+      if (i.existing) { i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; return; }
+      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, stageStart: null,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
     });
     if (prefix) state.config.spLinkBase = prefix;
@@ -345,12 +391,13 @@ function update() {
     ? `<span class="warn">No developers — engineering can't be scheduled</span>`
     : `<b>${plan.rows.length}</b> use cases · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
       (fc ? ` · <span title="Monte Carlo: ${fc.iterations} simulated runs sampling effort between best and worst case">50%: <b>${fmt(fc.p50.date)}</b> · 80%: <b>${fmt(fc.p80.date)}</b> · 90%: <b>${fmt(fc.p90.date)}</b></span>` : '') +
+      (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the clock has not started, so these are not in the plan">${plan.triage} in triage</span>` : '') +
       (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '');
   plan.rows.forEach(r => {
     const tr = document.querySelector(`tr[data-id="${r.id}"]`); if (!tr) return;
     const e = r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng');
     tr.querySelector('[data-c=eng]').textContent = e ? `${fmt(e.startDate)} → ${fmt(e.endDate)}` + (r.queueWeeks > 0 ? ` · queued ${wk(r.queueWeeks)}w` : '') : '—';
-    tr.querySelector('[data-c=end]').textContent = r.endDate ? fmt(r.endDate) : '—';
+    tr.querySelector('[data-c=end]').textContent = r.endDate ? fmt(r.endDate) : (r.triage ? 'Not started' : '—');
     const f = fc && fc.rows[r.id]; tr.querySelector('[data-c=p80]').textContent = f ? fmt(f.p80Date) : '—';
   });
   renderGantt();
@@ -371,7 +418,7 @@ const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
 let NAME_W = Math.min(700, Math.max(90, Number(lsGet('nameW')) || 206));
-const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['cx', 84, 'Complexity'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
+const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -413,21 +460,28 @@ function leftSVG(L, ui = true) {
   cols().forEach((c, ci) => { xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${c[2]}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui && c[0] === 'name') o += `<rect data-resize x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
+  const byId = Object.fromEntries(state.items.map(it => [it.id, it]));
+  const cxName = k => (state.config.complexities.find(c => c.key === k) || {}).name || '';
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
-    .concat(plan.rows.map((r, i) => { const f = r.bars.find(b => b.type === 'stage') || r.bars[0];
-      const it = state.items[i] || {};
-      return { idx: i, cx: (state.config.complexities.find(c => c.key === it.complexity) || {}).name || '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, dur: r.end != null && f ? r.end - f.start : null, start: f ? f.startDate : null, end: r.endDate }; }));
+    .concat(plan.rows.map((r, i) => {
+      const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
+      return { itemId: r.id, cx: cxName(it.complexity), stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
+        dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
   rows.forEach((r, i) => {
     const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
     o += `<line x1="0" x2="${lw()}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
-    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.cx || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : '—'];
-    if (ui && i > 0 && vals[2]) vals[2] += ' ▾';
+    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.stage || '', String(r.pri ?? ''), r.cx || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
+    if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; }
     vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(v)}</text>`;
+      const dim = r.triage && k > 1;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cols()[k][1] - 8))}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : t;
     });
-    if (ui && i > 0) o += `<rect data-cx="${r.idx}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
+    if (ui && i > 0) {
+      o += `<rect data-pick="stage" data-id="${esc(r.itemId)}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change stage</title></rect>`;
+      o += `<rect data-pick="cx" data-id="${esc(r.itemId)}" x="${xs[4]}" y="${y}" width="${cols()[4][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
+    }
   });
   return `<line x1="0" x2="${lw()}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
 }
@@ -467,6 +521,7 @@ function rightSVG(L) {
         o += '</g>';
       }
     });
+    if (r.triage) o += `<text x="${L.XW(0) + 8}" y="${y + RH / 2 + 4}" font-size="11" font-style="italic" fill="#8a94a3">Stakeholder Triage: clock not started</text>`;
     const f = fc && fc.rows[r.id];
     if (f && r.end != null && f.p80 > r.end + 0.05) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;

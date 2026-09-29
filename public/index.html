@@ -26,7 +26,7 @@
     <div class="setting"><div class="sh"><label for="cap">Max per use case</label><input id="cap" data-nudge="0.5" type="number" min="0.5" step="0.5"></div>
       <p class="hint">Most developers that can work on a single use case at once. Work can only be split so far, so this stops one use case swallowing the whole pool.</p></div>
     <div class="setting"><div class="sh"><label for="wip">Max in flight</label><input id="wip" data-nudge="1" type="number" min="0" step="1" placeholder="none"></div>
-      <p class="hint">Most use cases in progress at once, from the start of their first stage to the end of their last. Others wait for a slot (hatched bar). 0 or blank = no limit.</p></div>
+      <p class="hint">Most use cases in progress at once. Use cases already past the first stage are counted as in flight; ones still at the first stage start when a slot frees up (hatched bar). 0 or blank = no limit.</p></div>
     <div class="setting"><div class="sh"><label for="ovh">Team overhead</label><input id="ovh" data-nudge="5" type="number" min="0" max="50" step="1"><span class="muted">%</span></div>
       <p class="hint">Throughput lost for each extra developer on the same use case (coordination cost, Brooks' law). At 10%, two developers deliver 1.9 developers' worth of work.</p></div>
     <div class="setting"><div class="sh"><label for="start">Start</label><input id="start" data-nudge="7" type="text" class="dateinp" placeholder="dd-mmm-yyyy"></div>
@@ -51,7 +51,7 @@
   <section class="panel" id="tab-cases" hidden>
     <div class="card">
       <div class="toolbar">
-        <span class="hint">Order = priority for developers</span>
+        <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order.</span>
         <span class="grow"></span>
         <button class="primary" id="add">+ Add</button>
         <button id="bulk">Bulk add…</button>
@@ -60,7 +60,7 @@
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
-        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Complexity</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -71,7 +71,7 @@
       <div class="row">
         <div class="lbl">Stages</div>
         <div class="chips" id="stages"></div>
-        <p class="hint help">The steps every use case goes through, in order. Type a stage's default length in weeks (a fixed timebox). Hover a stage for ◀ ▶ to reorder, ✕ to remove, or ⚙ to make it the <b>engineering</b> stage, whose length is not fixed but comes from the use case's size and the developers available. Any use case can override a stage under "details" on the Use cases tab.</p>
+        <p class="hint help">The steps every use case goes through, in order. <b>Stakeholder Triage (0)</b> comes before them and is not a scheduled stage: while a use case is there the clock has not started (it is being refined with the submitter before approval), so it is left out of the plan. Set each use case's current stage on the Use cases tab or in the Gantt, and earlier stages are skipped. Type a stage's default length in weeks (a fixed timebox). Hover a stage for ◀ ▶ to reorder, ✕ to remove, or ⚙ to make it the <b>engineering</b> stage, whose length is not fixed but comes from the use case's size and the developers available. Any use case can override a stage under "details" on the Use cases tab.</p>
       </div>
       <div class="row">
         <div class="lbl">Engineering size</div>

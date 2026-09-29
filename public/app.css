@@ -93,3 +93,7 @@
 .dateinp { width:112px; }
 .dateinp.bad { border-color:#e5484d !important; outline:2px solid rgba(229,72,77,.35); }
 input.wide { flex:1; min-width:320px; }
+
+.chip .stagenum { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:var(--line); color:var(--muted); font-size:11px; font-weight:600; margin-left:2px; }
+.chip.triage { opacity:.8; } .chip.triage .tname { font-weight:500; padding:0 4px; }
+input.pri { width:54px; }

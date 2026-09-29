@@ -21,12 +21,26 @@
     return fmtDate(new Date(d.getTime() + ((8 - d.getUTCDay()) % 7 || 7) * DAY));
   }
 
+  const TRIAGE = 'triage';
+  const DEFAULT_STAGES = () => [
+    { id: 'ideation', name: 'Ideation', weeks: 2 },
+    { id: 'discovery', name: 'Discovery', weeks: 2 },
+    { id: 'feasibility', name: 'Feasibility', weeks: 4 },
+    { id: 'eng', name: 'Build', kind: 'eng' },
+    { id: 'release', name: 'Validate and Release', weeks: 3 },
+    { id: 'operate', name: 'Operate', weeks: 2 },
+  ];
+
   function defaultState() {
+    // Sample portfolio spread across the pipeline: most advanced first, then priority.
+    const stagePlan = ['eng', 'eng', 'release', 'operate', 'feasibility', 'feasibility', 'discovery', 'discovery',
+      'ideation', 'ideation', 'ideation', 'ideation', TRIAGE, TRIAGE, TRIAGE, TRIAGE, TRIAGE];
     const items = [];
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= 17; i++) {
       items.push({
         id: 'uc' + i, name: 'AI use case ' + i,
         complexity: ['low', 'medium', 'medium', 'high', 'very high'][(i * 7) % 5],
+        stage: stagePlan[i - 1], priority: i, stageStart: null,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {},
       });
     }
@@ -37,14 +51,7 @@
         defaultTeamCap: 2,
         teamOverhead: 0.1,
         wipLimit: 6,
-        stages: [
-          { id: 'discovery', name: 'Discovery', weeks: 2 },
-          { id: 'pov', name: 'Proof of value', weeks: 4 },
-          { id: 'eng', name: 'Engineering', kind: 'eng' },
-          { id: 'prod', name: 'Production readiness', weeks: 2 },
-          { id: 'deploy', name: 'Deployment', weeks: 1 },
-          { id: 'support', name: 'Support transition', weeks: 2 },
-        ],
+        stages: DEFAULT_STAGES(),
         complexities: [
           { key: 'low', name: 'Low', min: 4, effort: 6, max: 10 },
           { key: 'medium', name: 'Medium', min: 8, effort: 12, max: 20 },
@@ -73,15 +80,36 @@
       if (x.min == null) x.min = Math.round(x.effort * 0.7);
       if (x.max == null) x.max = Math.round(x.effort * 1.75);
     });
-    state.items.forEach(it => { if (!it.overrides) it.overrides = {}; });
+    const first = c.stages[0] && c.stages[0].id;
+    state.items.forEach(it => {
+      if (!it.overrides) it.overrides = {};
+      if (it.stage !== TRIAGE && !c.stages.some(s => s.id === it.stage)) it.stage = first; // missing / removed stage
+      if (it.priority === undefined || it.priority === '') it.priority = null;
+      if (it.stageStart === undefined) it.stageStart = null;
+    });
     return state;
   }
 
   const pertMean = x => (x.min + 4 * x.effort + x.max) / 6;
 
+  // Position in the pipeline: -1 = Stakeholder Triage (clock not started), 0.. = index of the current stage.
+  function stageRank(state, it) {
+    if (it.stage === TRIAGE) return -1;
+    const i = state.config.stages.findIndex(s => s.id === it.stage);
+    return i < 0 ? 0 : i;
+  }
+  const prioVal = it => (it.priority == null || it.priority === '' || isNaN(Number(it.priority))) ? Infinity : Number(it.priority);
+  // Most advanced stage first, then priority (1 = highest), then original order.
+  function orderItems(state) {
+    return state.items.map((it, i) => ({ it, i, rank: stageRank(state, it), p: prioVal(it) }))
+      .sort((a, b) => (b.rank - a.rank) || (a.p === b.p ? 0 : a.p < b.p ? -1 : 1) || (a.i - b.i))
+      .map(x => x.it);
+  }
+
   function schedule(state, opts = {}) {
     normalize(state);
-    const { config, items } = state;
+    const { config } = state;
+    const items = orderItems(state);
     const start = parseDate(config.startDate);
     const stages = config.stages;
     const engIdx = stages.findIndex(s => s.kind === 'eng');
@@ -93,41 +121,52 @@
       const o = it.overrides && it.overrides[s.id];
       return Math.max(0, Number(o != null && o !== '' ? o : s.weeks) || 0);
     };
-    const sum = (it, list) => list.reduce((a, s) => a + weeksFor(it, s), 0);
 
     const rows = items.map(it => {
-      const earliest = it.earliestStart
-        ? Math.max(0, Math.round((parseDate(it.earliestStart) - start) / (7 * DAY))) : 0;
+      const cur = stageRank(state, it), triage = cur < 0;
+      // Time already spent in the current stage before the plan starts.
+      const since = it.stageStart ? (start - parseDate(it.stageStart)) / (7 * DAY) : 0;
+      let earliest = it.earliestStart ? Math.max(0, Math.round((parseDate(it.earliestStart) - start) / (7 * DAY))) : 0;
+      if (since < 0) earliest = Math.max(earliest, Math.round(-since));
+      const elapsed = Math.max(0, since);
+      const durOf = (s, i) => { const w = weeksFor(it, s); return i === cur && i !== engIdx ? Math.max(0, w - elapsed) : w; };
+      const pastEng = engIdx >= 0 && cur > engIdx;
+      const hasEng = engIdx >= 0 && !triage && !pastEng;
+      const sumDur = (from, to) => { let a = 0; for (let i = from; i < to; i++) a += durOf(stages[i], i); return a; };
       let effort = 0;
-      if (engIdx >= 0) {
+      if (hasEng) {
         if (Number(it.effortOverride) > 0) effort = Number(it.effortOverride);
         else if (opts.efforts && opts.efforts[it.id] != null) effort = opts.efforts[it.id];
         else if (cx[it.complexity]) effort = pertMean(cx[it.complexity]);
       }
       const cap = Math.max(0.1, Number(it.teamCap) || Number(config.defaultTeamCap) || 1);
       return {
-        item: it, effort, cap, remaining: effort, earliest,
-        pre: engIdx < 0 ? 0 : sum(it, stages.slice(0, engIdx)),
-        post: engIdx < 0 ? 0 : sum(it, stages.slice(engIdx + 1)),
+        item: it, cur, triage, durOf, pastEng, effort, cap, remaining: effort, earliest,
+        forced: !triage && (cur > 0 || !!it.stageStart),   // already under way: never held back by the WIP limit
+        pre: hasEng ? sumDur(cur, engIdx) : 0,
+        post: engIdx < 0 || triage ? 0 : sumDur(Math.max(cur, engIdx + 1), stages.length),
         started: false, startWk: null, readyAt: Infinity, engStart: null, engEnd: null, finish: null,
       };
     });
+    const active = rows.filter(r => !r.triage);
 
     if (engIdx < 0) {
-      rows.forEach(r => { r.started = true; r.startWk = r.earliest; });
-    } else if (pool > 0) {
+      active.forEach(r => { r.started = true; r.startWk = r.earliest; });
+    } else {
       const eff = a => Math.max(0.3, 1 - overhead * Math.max(0, a - 1));
-      for (let t = 0; t < 1000 && rows.some(r => r.finish === null); t++) {
-        // Start work while under the WIP limit, in priority order.
-        let inflight = rows.filter(r => r.started && (r.finish === null || r.finish > t)).length;
-        for (const r of rows) {
+      const begin = (r, t, inflight) => {
+        r.started = true; r.startWk = t; r.readyAt = t + r.pre;
+        if (r.effort <= 1e-9) { r.engStart = r.engEnd = r.readyAt; r.finish = r.engEnd + r.post; }
+      };
+      for (let t = 0; t < 1000 && active.some(r => r.finish === null); t++) {
+        let inflight = active.filter(r => r.started && (r.finish === null || r.finish > t)).length;
+        for (const r of active) if (!r.started && r.forced && r.earliest <= t) { begin(r, t); inflight++; }
+        for (const r of active) {
           if (r.started || r.earliest > t || (wip && inflight >= wip)) continue;
-          r.started = true; r.startWk = t; r.readyAt = t + r.pre; inflight++;
-          if (r.effort <= 1e-9) { r.engStart = r.engEnd = r.readyAt; r.finish = r.engEnd + r.post; }
+          begin(r, t); inflight++;
         }
-        // Hand out the developer pool.
         let free = pool;
-        for (const r of rows) {
+        for (const r of active) {
           if (free <= 1e-9) break;
           if (!r.started || r.finish !== null || r.readyAt > t) continue;
           const alloc = Math.min(r.cap, free), prog = alloc * eff(alloc);
@@ -144,28 +183,34 @@
     let overallEnd = 0;
     const out = rows.map(r => {
       const it = r.item, bars = [];
+      const stageName = r.triage ? 'Stakeholder Triage' : (stages[r.cur] || {}).name || '';
+      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, triage: r.triage };
+      if (r.triage) return { ...base, effort: 0, teamCap: r.cap, scheduled: false, queueWeeks: null, bars: [], end: null, endDate: null };
       const scheduled = r.started && (engIdx < 0 || r.engEnd !== null);
       let t = r.startWk ?? r.earliest;
       if (r.started && r.startWk > r.earliest) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: r.earliest, end: r.startWk });
-      stages.forEach((s, i) => {
-        if (!r.started) return;
+      const push = (s, i, a, b) => { if (b > a) bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: a, end: b }); };
+      if (r.started) for (let i = r.cur; i < stages.length; i++) {
+        const s = stages[i];
         if (i === engIdx) {
-          if (!scheduled) return;
+          if (!scheduled) continue;
           if (r.engStart > t) bars.push({ key: 'queue', stageId: null, name: 'Waiting for developers', type: 'queue', start: t, end: r.engStart });
-          if (r.engEnd > r.engStart) bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: r.engStart, end: r.engEnd });
+          push(s, i, r.engStart, r.engEnd);
           t = r.engEnd;
         } else if (engIdx < 0 || i < engIdx || scheduled) {
-          const w = weeksFor(it, s);
-          bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: t, end: t + w });
+          const w = r.durOf(s, i);
+          push(s, i, t, t + w);
           t += w;
         }
-      });
+      }
       if (scheduled) overallEnd = Math.max(overallEnd, t);
       const dec = b => ({ ...b, startDate: fmtDate(addWeeks(start, b.start)), endDate: fmtDate(addWeeks(start, b.end)) });
+      const first = bars.find(b => b.type === 'stage');
       return {
-        id: it.id, name: it.name, complexity: it.complexity, effort: r.effort, teamCap: r.cap, scheduled,
-        queueWeeks: r.engStart !== null ? r.engStart - r.readyAt : null,
-        bars: bars.map(dec), end: scheduled ? t : null, endDate: scheduled ? fmtDate(addWeeks(start, t)) : null,
+        ...base, effort: r.effort, teamCap: r.cap, scheduled,
+        queueWeeks: r.engStart !== null && r.readyAt !== Infinity ? r.engStart - r.readyAt : null,
+        bars: bars.map(dec), begin: first ? first.start : (r.startWk ?? r.earliest),
+        end: scheduled ? t : null, endDate: scheduled ? fmtDate(addWeeks(start, t)) : null,
       };
     });
 
@@ -173,7 +218,8 @@
       startDate: config.startDate, rows: out, totalWeeks: overallEnd,
       endDate: fmtDate(addWeeks(start, overallEnd)),
       totalEffort: rows.reduce((s, r) => s + r.effort, 0),
-      unscheduled: out.filter(r => !r.scheduled).length,
+      triage: out.filter(r => r.triage).length,
+      unscheduled: out.filter(r => !r.triage && !r.scheduled).length,
     };
   }
 
@@ -215,7 +261,7 @@
       const r = schedule(state, { efforts });
       if (r.unscheduled) return null;
       totals.push(r.totalWeeks);
-      r.rows.forEach(row => (per[row.id] = per[row.id] || []).push(row.end));
+      r.rows.forEach(row => { if (row.end != null) (per[row.id] = per[row.id] || []).push(row.end); });
     }
     const d = w => fmtDate(addWeeks(start, w));
     const summary = p => { const w = pct(totals, p); return { weeks: w, date: d(w) }; };
@@ -224,7 +270,7 @@
     return { p50: summary(.5), p80: summary(.8), p90: summary(.9), rows: rowsOut, iterations };
   }
 
-  const api = { schedule, forecast, defaultState, normalize, pertMean, parseDate, fmtDate, addWeeks };
+  const api = { schedule, forecast, defaultState, normalize, orderItems, stageRank, pertMean, parseDate, fmtDate, addWeeks, TRIAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Scheduler = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -3,6 +3,40 @@
     "startDate": "2026-10-05",
     "devResources": 17,
     "defaultTeamCap": 2,
+    "teamOverhead": 0.1,
+    "wipLimit": 10,
+    "stages": [
+      {
+        "id": "ideation",
+        "name": "Ideation",
+        "weeks": 2
+      },
+      {
+        "id": "discovery",
+        "name": "Discovery",
+        "weeks": 2
+      },
+      {
+        "id": "feasibility",
+        "name": "Feasibility",
+        "weeks": 4
+      },
+      {
+        "id": "eng",
+        "name": "Build",
+        "kind": "eng"
+      },
+      {
+        "id": "release",
+        "name": "Validate and Release",
+        "weeks": 3
+      },
+      {
+        "id": "operate",
+        "name": "Operate",
+        "weeks": 2
+      }
+    ],
     "complexities": [
       {
         "key": "low",
@@ -32,47 +66,16 @@
         "min": 28,
         "max": 70
       }
-    ],
-    "stages": [
-      {
-        "id": "discovery",
-        "name": "Discovery",
-        "weeks": 2
-      },
-      {
-        "id": "pov",
-        "name": "Proof of value",
-        "weeks": 4
-      },
-      {
-        "id": "eng",
-        "name": "Engineering",
-        "kind": "eng"
-      },
-      {
-        "id": "prod",
-        "name": "Production readiness",
-        "weeks": 2
-      },
-      {
-        "id": "deploy",
-        "name": "Deployment",
-        "weeks": 1
-      },
-      {
-        "id": "support",
-        "name": "Support transition",
-        "weeks": 2
-      }
-    ],
-    "teamOverhead": 0.1,
-    "wipLimit": 10
+    ]
   },
   "items": [
     {
       "id": "uc1",
       "name": "AI use case 1",
-      "complexity": "high",
+      "complexity": "medium",
+      "stage": "eng",
+      "priority": 1,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -82,6 +85,9 @@
       "id": "uc2",
       "name": "AI use case 2",
       "complexity": "very high",
+      "stage": "eng",
+      "priority": 2,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -91,6 +97,9 @@
       "id": "uc3",
       "name": "AI use case 3",
       "complexity": "medium",
+      "stage": "release",
+      "priority": 3,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -100,6 +109,9 @@
       "id": "uc4",
       "name": "AI use case 4",
       "complexity": "high",
+      "stage": "operate",
+      "priority": 4,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -109,6 +121,9 @@
       "id": "uc5",
       "name": "AI use case 5",
       "complexity": "low",
+      "stage": "feasibility",
+      "priority": 5,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -118,6 +133,9 @@
       "id": "uc6",
       "name": "AI use case 6",
       "complexity": "medium",
+      "stage": "feasibility",
+      "priority": 6,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -127,6 +145,9 @@
       "id": "uc7",
       "name": "AI use case 7",
       "complexity": "very high",
+      "stage": "discovery",
+      "priority": 7,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -136,6 +157,9 @@
       "id": "uc8",
       "name": "AI use case 8",
       "complexity": "medium",
+      "stage": "discovery",
+      "priority": 8,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -145,6 +169,9 @@
       "id": "uc9",
       "name": "AI use case 9",
       "complexity": "high",
+      "stage": "ideation",
+      "priority": 9,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -154,6 +181,9 @@
       "id": "uc10",
       "name": "AI use case 10",
       "complexity": "low",
+      "stage": "ideation",
+      "priority": 10,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -163,6 +193,9 @@
       "id": "uc11",
       "name": "AI use case 11",
       "complexity": "medium",
+      "stage": "ideation",
+      "priority": 11,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -172,6 +205,9 @@
       "id": "uc12",
       "name": "AI use case 12",
       "complexity": "very high",
+      "stage": "ideation",
+      "priority": 12,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -181,6 +217,9 @@
       "id": "uc13",
       "name": "AI use case 13",
       "complexity": "medium",
+      "stage": "triage",
+      "priority": 13,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -190,6 +229,9 @@
       "id": "uc14",
       "name": "AI use case 14",
       "complexity": "high",
+      "stage": "triage",
+      "priority": 14,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -199,6 +241,9 @@
       "id": "uc15",
       "name": "AI use case 15",
       "complexity": "low",
+      "stage": "triage",
+      "priority": 15,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -208,6 +253,9 @@
       "id": "uc16",
       "name": "AI use case 16",
       "complexity": "medium",
+      "stage": "triage",
+      "priority": 16,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
@@ -217,6 +265,9 @@
       "id": "uc17",
       "name": "AI use case 17",
       "complexity": "very high",
+      "stage": "triage",
+      "priority": 17,
+      "stageStart": null,
       "teamCap": null,
       "effortOverride": null,
       "earliestStart": null,
