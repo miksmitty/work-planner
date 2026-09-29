@@ -14,7 +14,7 @@
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="timeline">Timeline</button>
       <button role="tab" data-tab="cases">Use cases</button>
-      <button role="tab" data-tab="stages">Stages &amp; sizing</button>
+      <button role="tab" data-tab="stages">Setup</button>
     </nav>
     <div id="summary"></div>
     <div class="hint" id="saved"></div>
@@ -29,8 +29,8 @@
       <p class="hint">Most use cases in progress at once, from the start of their first stage to the end of their last. Others wait for a slot (hatched bar). 0 or blank = no limit.</p></div>
     <div class="setting"><div class="sh"><label for="ovh">Team overhead</label><input id="ovh" data-nudge="5" type="number" min="0" max="50" step="1"><span class="muted">%</span></div>
       <p class="hint">Throughput lost for each extra developer on the same use case (coordination cost, Brooks' law). At 10%, two developers deliver 1.9 developers' worth of work.</p></div>
-    <div class="setting"><div class="sh"><label for="start">Start</label><input id="start" data-nudge="7" type="date"></div>
-      <p class="hint">Date the programme begins. The arrows move it a week at a time.</p></div>
+    <div class="setting"><div class="sh"><label for="start">Start</label><input id="start" data-nudge="7" type="text" class="dateinp" placeholder="dd-mmm-yyyy"></div>
+      <p class="hint">Date the programme begins. The arrows move it a week at a time. Format dd-mmm-yyyy.</p></div>
   </div>
 
   <section class="panel" id="tab-timeline">
@@ -77,6 +77,11 @@
         <div class="lbl">Engineering size</div>
         <div class="chips sizes" id="sizes"></div>
         <p class="hint help">Engineering effort for each complexity level, in developer-weeks: best case · most likely · worst case (weeks of one developer's work). The plan uses the weighted expected value, (best + 4×likely + worst) ÷ 6, shown after ≈. The 50/80/90% dates come from simulating many runs between best and worst case. Complexity is chosen per use case on the Use cases tab.</p>
+      </div>
+      <div class="row">
+        <div class="lbl">SharePoint links</div>
+        <input type="text" id="spbase" class="wide" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=">
+        <p class="hint help">Base URL of your SharePoint list item page. Any use case without a URL of its own gets a link built as <b>base URL + SharePoint ID</b> (or put <b>{id}</b> in the URL where the ID should go). A URL entered or imported for a specific use case always wins.</p>
       </div>
     </div>
   </section>

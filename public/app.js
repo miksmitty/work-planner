@@ -1,6 +1,29 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const fmt = d => new Date(d + 'T00:00:00Z').toLocaleDateString(undefined, { day:'numeric', month:'short', year:'2-digit', timeZone:'UTC' });
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmt = d => { const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}-${MON[+m - 1]}-${y}`; }; // dd-mmm-yyyy
+// Accepts dd-mmm-yyyy, d/m/yyyy, d.m.yyyy or yyyy-mm-dd. Returns ISO yyyy-mm-dd, '' for blank, null if invalid.
+function parseDateText(t) {
+  t = String(t || '').trim(); if (!t) return '';
+  let y, m, d, x;
+  if ((x = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+  else if ((x = t.match(/^(\d{1,2})[-\/ .]+([A-Za-z]{3,9})[-\/ .,]+(\d{2,4})$/))) { d = +x[1]; m = MON.findIndex(n => n.toLowerCase() === x[2].slice(0, 3).toLowerCase()) + 1; y = +x[3]; }
+  else if ((x = t.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/))) { d = +x[1]; m = +x[2]; y = +x[3]; }
+  else return null;
+  if (y < 100) y += 2000;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (!m || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return Scheduler.fmtDate(dt);
+}
+// Text input showing dd-mmm-yyyy; calls onValue(iso|'') when the text parses, reverts otherwise.
+function bindDate(el, get, onValue) {
+  el.value = get() ? fmt(get()) : '';
+  el.onchange = () => {
+    const iso = parseDateText(el.value);
+    if (iso === null) { el.classList.add('bad'); setTimeout(() => el.classList.remove('bad'), 900); el.value = get() ? fmt(get()) : ''; return; }
+    onValue(iso); el.value = iso ? fmt(iso) : '';
+  };
+}
 const wk = n => Math.round(n * 10) / 10;
 const num = v => v === '' || v == null ? null : Number(v);
 const color = i => `var(--s${i % 8})`;
@@ -35,7 +58,23 @@ function bind() {
   $('#cap').oninput = e => { c().defaultTeamCap = Number(e.target.value); update(); };
   $('#wip').oninput = e => { c().wipLimit = Number(e.target.value) || 0; update(); };
   $('#ovh').oninput = e => { c().teamOverhead = (Number(e.target.value) || 0) / 100; update(); };
-  $('#start').oninput = e => { if (e.target.value) { c().startDate = e.target.value; update(); } };
+  bindDate($('#start'), () => c().startDate, iso => { if (iso) { c().startDate = iso; update(); } });
+  $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
+  const g = $('#gantt');
+  g.addEventListener('mousedown', e => {
+    if (!e.target.closest('[data-resize]')) return;
+    e.preventDefault();
+    const x0 = e.clientX, w0 = NAME_W; let raf = 0;
+    const mv = ev => { NAME_W = Math.min(700, Math.max(90, w0 + ev.clientX - x0)); cancelAnimationFrame(raf); raf = requestAnimationFrame(renderGantt); };
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); lsSet('nameW', NAME_W); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  });
+  g.addEventListener('dblclick', e => {
+    if (!e.target.closest('[data-resize]')) return;
+    const longest = Math.max(...plan.rows.map(r => r.name.length), 9);
+    NAME_W = Math.min(700, Math.max(90, Math.round(longest * 6.3 + 16))); lsSet('nameW', NAME_W); renderGantt();
+  });
+  g.addEventListener('click', e => { const c = e.target.closest('[data-cx]'); if (c) pickComplexity(c); });
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
   $('#fit').checked = lsGet('fit') !== '0';
   $('#fit').onchange = () => { lsSet('fit', $('#fit').checked ? '1' : '0'); renderGantt(); };
@@ -64,10 +103,25 @@ function bind() {
   });
   syncInputs();
 }
+// Inline complexity picker over a Gantt row.
+function pickComplexity(rect) {
+  document.querySelectorAll('.cxpick').forEach(x => x.remove());
+  const it = state.items[Number(rect.dataset.cx)]; if (!it) return;
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
+  const sel = document.createElement('select'); sel.className = 'cxpick';
+  sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
+  sel.innerHTML = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  sel.onchange = () => { it.complexity = sel.value; sel.remove(); renderRows(); update(); };
+  sel.onblur = () => sel.remove();
+  sel.onkeydown = e => { if (e.key === 'Escape') sel.remove(); };
+  box.appendChild(sel); sel.focus(); try { sel.showPicker(); } catch {}
+}
 function nudge(inp, dir) {
   const n = Number(inp.dataset.nudge);
-  if (inp.type === 'date') {
-    inp.value = Scheduler.fmtDate(Scheduler.addWeeks(Scheduler.parseDate(inp.value || state.config.startDate), dir * n / 7));
+  if (inp.id === 'start') {
+    inp.value = fmt(Scheduler.fmtDate(Scheduler.addWeeks(Scheduler.parseDate(state.config.startDate), dir * n / 7)));
+    inp.dispatchEvent(new Event('change'));
+    return;
   } else {
     const min = inp.min !== '' ? Number(inp.min) : 0, max = inp.max !== '' ? Number(inp.max) : Infinity;
     inp.value = Math.min(max, Math.max(min, Math.round(((Number(inp.value) || 0) + dir * n) * 100) / 100));
@@ -76,7 +130,7 @@ function nudge(inp, dir) {
 }
 function syncInputs() {
   const c = state.config;
-  $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#start').value = c.startDate;
+  $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#start').value = fmt(c.startDate); $('#spbase').value = c.spLinkBase || '';
 }
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
   teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
@@ -129,7 +183,7 @@ function renderRows() {
   state.items.forEach((it, i) => {
     const tr = document.createElement('tr'); tr.dataset.id = it.id;
     const opts = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
-    const link = safeUrl(it.url);
+    const link = itemUrl(it);
     tr.innerHTML = `<td class="num">${i + 1}</td>
       <td class="calc">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" title="Open in SharePoint">${esc(it.spId || 'link')} ↗</a>` : esc(it.spId || '')}</td>
       <td><input type="text" data-f="name" value="${esc(it.name)}"></td>
@@ -159,11 +213,12 @@ function detailsRow(it) {
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
     <label title="Fixed engineering effort for this use case, replacing the estimate from its complexity. Blank = use complexity.">Engineering dev-weeks <input type="number" min="0" data-k="effortOverride" placeholder="auto" value="${it.effortOverride ?? ''}"></label>
     <label title="Most developers on this use case at once. Blank = use the global Max per use case.">Max devs <input type="number" min="0.5" step="0.5" data-k="teamCap" placeholder="default" value="${it.teamCap ?? ''}"></label>
-    <label title="Earliest date this use case may start. Blank = as soon as a slot is free.">Not before <input type="date" data-k="earliestStart" value="${it.earliestStart ?? ''}"></label>
+    <label title="Earliest date this use case may start. Blank = as soon as a slot is free.">Not before <input type="text" class="dateinp" data-d="earliestStart" placeholder="dd-mmm-yyyy"></label>
     ${fixed.map(s => `<label title="Weeks for this stage on this use case only. Blank = the stage default (${s.weeks}).">${esc(s.name)} wks <input type="number" min="0" data-s="${s.id}" placeholder="${s.weeks}" value="${it.overrides[s.id] ?? ''}"></label>`).join('')}
   </div><div class="hint">Overrides apply to this use case only. Leave a box empty to use the default shown in grey.</div></td>`;
+  tr.querySelectorAll('[data-d]').forEach(el => bindDate(el, () => it[el.dataset.d], iso => { it[el.dataset.d] = iso || null; update(); }));
   tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.value.trim() || null; update(); });
-  tr.querySelectorAll('[data-k]').forEach(el => el.oninput = () => { it[el.dataset.k] = el.type === 'date' ? (el.value || null) : num(el.value); update(); });
+  tr.querySelectorAll('[data-k]').forEach(el => el.oninput = () => { it[el.dataset.k] = num(el.value); update(); });
   tr.querySelectorAll('[data-s]').forEach(el => el.oninput = () => {
     const v = num(el.value); if (v == null) delete it.overrides[el.dataset.s]; else it.overrides[el.dataset.s] = v; update();
   });
@@ -216,8 +271,7 @@ function planImport(rows, map, prefix, mode) {
     const g = i => i < 0 ? '' : String(r[i] ?? '').replace(/\s+/g, ' ').trim();
     const spId = g(ci.id), name = g(ci.name);
     if (!name && !spId) { out.skipped++; return; }
-    let url = safeUrl(g(ci.url));
-    if (!url && prefix && spId) url = safeUrl(prefix + encodeURIComponent(spId));
+    const url = safeUrl(g(ci.url));  // only a URL the file supplies is stored; the base URL is applied live
     let cx = ci.cx >= 0 ? matchComplexity(g(ci.cx)) : null;
     if (ci.cx >= 0 && !cx && g(ci.cx)) out.unmatched.add(g(ci.cx));
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
@@ -239,19 +293,19 @@ function showImport(rows, fileName) {
       <label>Name</label><select data-m="name">${opts(guess('name'))}</select>
       <label>Complexity</label><select data-m="complexity">${opts(guess('complexity'))}</select>
       <label>Item URL</label><select data-m="url">${opts(guess('url'))}</select>
-      <label title="Used when a row has no URL: this text + the item's ID">Link prefix</label>
+      <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
       <label>If ID already exists</label>
       <select id="imp-mode"><option value="update">Update it, add the rest</option><option value="add">Add everything as new</option><option value="replace">Replace all existing use cases</option></select>
     </div>
     <div class="preview" id="imp-prev"></div>
-    <div class="actions"><span class="hint grow">Complexity can be a level name (Low, Medium…), S/M/L/XL, or 1–4. Existing items keep their overrides.</span><button id="imp-cancel">Cancel</button><button class="primary" id="imp-go">Import</button></div>`;
+    <div class="actions"><span class="hint grow">Complexity can be a level name (Low, Medium…), S/M/L/XL, or 1–4. Existing items keep their overrides. The Base URL is also editable on the Setup tab.</span><button id="imp-cancel">Cancel</button><button class="primary" id="imp-go">Import</button></div>`;
   document.body.appendChild(dlg);
   const read = () => ({ map: Object.fromEntries([...dlg.querySelectorAll('[data-m]')].map(e => [e.dataset.m, e.value])), prefix: dlg.querySelector('#imp-prefix').value.trim(), mode: dlg.querySelector('#imp-mode').value });
   const preview = () => {
     const { map, prefix, mode } = read();
     const p = planImport(rows, map, prefix, mode === 'update' ? 'update' : 'add');
-    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${i.url ? esc(i.url) : 'no link'}</div>`).join('');
+    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
     dlg.querySelector('#imp-prev').innerHTML = `<b>${mode === 'replace' ? p.items.length + ' will replace all existing' : p.adds + ' new, ' + p.updates + ' updated'}</b>${p.skipped ? ` · ${p.skipped} blank rows skipped` : ''}` +
       (!map.name ? `<div class="warn">Choose a Name column.</div>` : '') +
       (p.unmatched.size ? `<div class="warn">Unrecognised complexity (will use ${esc(state.config.complexities[1]?.name || 'default')}): ${[...p.unmatched].slice(0, 8).map(esc).join(', ')}</div>` : '') + `<div class="muted" style="margin-top:6px">${sample}</div>`;
@@ -271,7 +325,8 @@ function showImport(rows, fileName) {
       state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
     });
-    state.config.spLinkBase = prefix || undefined;
+    if (prefix) state.config.spLinkBase = prefix;
+    $('#spbase').value = state.config.spLinkBase || '';
     $('#importMsg').textContent = `Imported ${p.adds} new, ${p.updates} updated`;
     dlg.close(); dlg.remove(); renderRows(); update();
   };
@@ -312,8 +367,9 @@ function update() {
 const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
-const LCOLS = [['id',56,'ID'],['name',206,'Task name'],['dur',66,'Duration'],['start',82,'Start'],['end',82,'Finish']];
-const LW = LCOLS.reduce((a, c) => a + c[1], 0);
+let NAME_W = Math.min(700, Math.max(90, Number(lsGet('nameW')) || 206));
+const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['cx', 84, 'Complexity'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
+const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
@@ -325,6 +381,12 @@ function showTab(t) {
   if (t === 'timeline' && plan) renderGantt();
 }
 const showToday = () => $('#today').checked;
+function resolveBase(base, id) {
+  base = String(base || '').trim(); if (!base || !id) return '';
+  return safeUrl(/\{id\}/i.test(base) ? base.replace(/\{id\}/gi, encodeURIComponent(id)) : base + encodeURIComponent(id));
+}
+// A use case's own URL wins; otherwise base URL + SharePoint ID.
+const itemUrl = it => safeUrl(it.url) || resolveBase(state.config.spLinkBase, it.spId);
 const safeUrl = u => { try { const x = new URL(String(u || '').trim()); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
 const clip = (t, w) => { t = String(t); const n = Math.floor(w / 6.2); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const shortDate = d => fmt(typeof d === 'string' ? d : Scheduler.fmtDate(d));
@@ -336,31 +398,35 @@ function layout(exportW) {
   const first = showToday() && Date.now() < start ? new Date() : start;
   const t0 = new Date(Date.UTC(first.getUTCFullYear(), Math.floor(first.getUTCMonth() / 3) * 3, 1));
   const t1 = new Date(Date.UTC(last.getUTCFullYear(), Math.floor(last.getUTCMonth() / 3) * 3 + 3, 1));
-  const avail = (exportW || $('#gantt').clientWidth) - LW - 4;
+  const avail = (exportW || $('#gantt').clientWidth) - lw() - 4;
   const ppd = (exportW || $('#fit').checked) && avail > 200 ? avail / ((t1 - t0) / DAYMS) : Number($('#zoom').value) / 2;
   const X = ms => (ms - t0) / DAYMS * ppd;
   return { ppd, start, t0, t1, X, XW: w => X(start.getTime() + w * 7 * DAYMS), width: Math.ceil(X(t1)), height: HH + (plan.rows.length + 1) * RH };
 }
 
-function leftSVG(L) {
-  const H = L.height; let o = `<rect width="${LW}" height="${H}" fill="#fff"/><rect width="${LW}" height="${HH}" fill="#e9edf3"/>`;
+function leftSVG(L, ui = true) {
+  const H = L.height; let o = `<rect width="${lw()}" height="${H}" fill="#fff"/><rect width="${lw()}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [];
-  LCOLS.forEach(c => { xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${c[2]}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`; });
+  cols().forEach((c, ci) => { xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${c[2]}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    if (ui && c[0] === 'name') o += `<rect data-resize x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
+  });
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
     .concat(plan.rows.map((r, i) => { const f = r.bars.find(b => b.type === 'stage') || r.bars[0];
       const it = state.items[i] || {};
-      return { id: it.spId || (i + 1), url: safeUrl(it.url), name: r.name, dur: r.end != null && f ? r.end - f.start : null, start: f ? f.startDate : null, end: r.endDate }; }));
+      return { idx: i, cx: (state.config.complexities.find(c => c.key === it.complexity) || {}).name || '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, dur: r.end != null && f ? r.end - f.start : null, start: f ? f.startDate : null, end: r.endDate }; }));
   rows.forEach((r, i) => {
     const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
-    o += `<line x1="0" x2="${LW}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
-    const vals = [i === 0 ? '' : r.id, clip(r.name, LCOLS[1][1] - 10), r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : '—'];
+    o += `<line x1="0" x2="${lw()}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
+    const vals = [i === 0 ? '' : r.id, clip(r.name, NAME_W - 10), r.cx || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : '—'];
+    if (ui && i > 0 && vals[2]) vals[2] += ' ▾';
     vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(v)}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : t;
     });
+    if (ui && i > 0) o += `<rect data-cx="${r.idx}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
   });
-  return `<line x1="0" x2="${LW}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
+  return `<line x1="0" x2="${lw()}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
 }
 
 function rightSVG(L) {
@@ -418,7 +484,7 @@ const SVG_DEFS = `<defs><pattern id="hatch" width="6" height="6" patternUnits="u
 function renderGantt() {
   if (activeTab !== 'timeline') return;
   const L = layout();
-  $('#gantt').innerHTML = `<div class="gflex"><div class="gleft"><svg xmlns="http://www.w3.org/2000/svg" width="${LW}" height="${L.height}">${SVG_DEFS}${leftSVG(L)}</svg></div>
+  $('#gantt').innerHTML = `<div class="gflex"><div class="gleft"><svg xmlns="http://www.w3.org/2000/svg" width="${lw()}" height="${L.height}">${SVG_DEFS}${leftSVG(L)}</svg></div>
     <div class="gscroll"><svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}">${SVG_DEFS}${rightSVG(L)}</svg></div></div>`;
   $('#legend').innerHTML = legendItems().map(i => `<span><i style="background:${i.c}"></i>${esc(i.t)}</span>`).join('');
 }
@@ -428,14 +494,14 @@ function legendItems() {
 }
 
 function downloadPNG() {
-  const L = layout(1800), TH = 34, LG = 30, W = LW + L.width, H = TH + L.height + LG;
+  const L = layout(1800), TH = 34, LG = 30, W = lw() + L.width, H = TH + L.height + LG;
   const title = `Work plan · ${state.config.devResources} developers · planned finish ${shortDate(plan.endDate)}` +
     (fc ? ` · 80% confident by ${shortDate(fc.p80.date)}` : '');
   let lg = '', x = 10;
   legendItems().forEach(i => { lg += `<rect x="${x}" y="${TH + L.height + 10}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${TH + L.height + 19}" font-size="11" fill="#33404f">${esc(i.t)}</text>`; x += 15 + i.t.length * 6 + 18; });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Helvetica, Arial, sans-serif">${SVG_DEFS}
     <rect width="${W}" height="${H}" fill="#fff"/><text x="10" y="22" font-size="15" font-weight="700" fill="#1c2430">${esc(title)}</text>
-    <g transform="translate(0,${TH})">${leftSVG(L)}</g><g transform="translate(${LW},${TH})">${rightSVG(L)}</g>${lg}</svg>`;
+    <g transform="translate(0,${TH})">${leftSVG(L, false)}</g><g transform="translate(${lw()},${TH})">${rightSVG(L)}</g>${lg}</svg>`;
   const scale = Math.min(2, 16000 / W), img = new Image();
   img.onload = () => {
     const cv = document.createElement('canvas'); cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
