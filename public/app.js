@@ -75,7 +75,7 @@ function bind() {
     const longest = Math.max(cols()[k][2].length * 1.1, ...leftRows(true).map(r => String(r.vals[k]).length));
     COLW[key] = Math.min(COL_MAX, Math.max(COL_MIN, Math.round(longest * 6.3 + 16))); saveColW(); renderGantt();
   });
-  g.addEventListener('click', e => { const c = e.target.closest('[data-pick]'); if (c) pickField(c); });
+  bindGrid(g);
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
   $('#fit').checked = lsGet('fit') !== '0';
   $('#fit').onchange = () => { lsSet('fit', $('#fit').checked ? '1' : '0'); renderGantt(); };
@@ -110,6 +110,18 @@ function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id), kind = rect.dataset.pick; if (!it) return;
   const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
+  if (kind === 'pri') {   // priority is a number, so use an input rather than a list
+    const inp = document.createElement('input'); inp.type = 'number'; inp.min = 1; inp.step = 1; inp.className = 'cxpick'; inp.value = it.priority ?? '';
+    inp.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
+    let done = false;
+    const finish = save => { if (done) return; done = true; inp.onblur = null; const v = num(inp.value);
+      if (inp.parentNode) inp.parentNode.removeChild(inp);
+      if (save && v !== it.priority) { pushUndo(); it.priority = v; renderRows(); update(); }
+      $('#gantt').focus({ preventScroll: true }); };
+    inp.onkeydown = e => { if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); e.stopPropagation(); };
+    inp.onblur = () => finish(true);
+    box.appendChild(inp); inp.focus(); inp.select(); return;
+  }
   const sel = document.createElement('select'); sel.className = 'cxpick';
   sel.style.cssText = `left:${rr.left - br.left}px;top:${rr.top - br.top}px;width:${rr.width}px;height:${rr.height}px`;
   sel.innerHTML = kind === 'stage' ? stageOptions(it.stage) : kind === 'sme' ? smeOptions(it.sme) : kind === 'reuse' ? reuseOptions(it.reuse)
@@ -117,9 +129,9 @@ function pickField(rect) {
   // close() is safe to call more than once: removing a focused select fires blur, which calls it again.
   let closed = false;
   const close = () => { if (closed) return; closed = true; sel.onblur = null; if (sel.parentNode) sel.parentNode.removeChild(sel); };
-  sel.onchange = () => { if (kind === 'stage') it.stage = sel.value; else if (kind === 'sme') it.sme = sel.value || null; else if (kind === 'reuse') it.reuse = sel.value || null; else it.complexity = sel.value; close(); renderRows(); update(); };
+  sel.onchange = () => { pushUndo(); if (kind === 'stage') it.stage = sel.value; else if (kind === 'sme') it.sme = sel.value || null; else if (kind === 'reuse') it.reuse = sel.value || null; else it.complexity = sel.value; close(); renderRows(); update(); $('#gantt').focus({ preventScroll: true }); };
   sel.onblur = close;
-  sel.onkeydown = e => { if (e.key === 'Escape') close(); };
+  sel.onkeydown = e => { if (e.key === 'Escape') { close(); $('#gantt').focus({ preventScroll: true }); } };
   box.appendChild(sel); sel.focus(); try { sel.showPicker(); } catch {}
 }
 function nudge(inp, dir) {
@@ -151,7 +163,11 @@ const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complex
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
   const st = state.config.stages, box = $('#stages'); box.innerHTML = '';
-  box.insertAdjacentHTML('beforeend', `<div class="chip triage" style="--c:#8a94a3" title="Use cases here have no clock and are not scheduled. Set a use case's stage to start its clock."><span class="stagenum">0</span><span class="tname">Stakeholder Triage</span><span class="by">clock not started</span></div><span class="arrow">→</span>`);
+  { const el = document.createElement('div'); el.className = 'chip triage'; el.style.setProperty('--c', '#8a94a3');
+    el.title = "Stakeholder Triage: back-and-forth with the submitter before approval. The delivery clock hasn't started, but the plan still predicts the use case by assuming triage takes this many weeks, then work begins.";
+    el.innerHTML = `<span class="stagenum">0</span><span class="tname">Stakeholder Triage</span><input type="number" min="0" step="1" value="${state.config.triageWeeks ?? 4}" aria-label="Estimated triage weeks"><span class="muted">wk est.</span>`;
+    el.querySelector('input').oninput = e => { state.config.triageWeeks = Math.max(0, Number(e.target.value) || 0); update(); };
+    box.appendChild(el); box.insertAdjacentHTML('beforeend', '<span class="arrow">→</span>'); }
   st.forEach((s, i) => {
     const eng = s.kind === 'eng';
     const el = document.createElement('div'); el.className = 'chip' + (eng ? ' eng' : ''); el.style.setProperty('--c', color(i));
@@ -260,6 +276,7 @@ function detailsRow(it) {
     <label title="ID of the item in the SharePoint list">SharePoint ID <input type="text" data-t="spId" value="${esc(it.spId ?? '')}"></label>
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
     <label title="Another use case in this plan whose delivered components this one extends. The reuse saving only applies once that use case's Build has finished (or if it is already past Build). Blank = the reuse rating applies straight away.">Builds on <select data-b="buildsOn"><option value="">— none —</option>${Scheduler.orderItems(state).filter(o => o.id !== it.id).map(o => `<option value="${esc(o.id)}" ${o.id === it.buildsOn ? 'selected' : ''}>${esc((o.spId ? o.spId + ' · ' : '') + o.name)}</option>`).join('')}</select></label>
+    <label title="Expected weeks of Stakeholder Triage for this use case (only used while it is in triage). Blank = the default on the Setup tab.">Triage weeks <input type="number" min="0" step="1" data-k="triageWeeks" placeholder="default" value="${it.triageWeeks ?? ''}"></label>
     <label title="Date this use case entered its current stage. Time already spent counts towards that stage's length (fixed-length stages only). Blank = starts fresh at the plan start.">In stage since <input type="text" class="dateinp" data-d="stageStart" placeholder="dd-mmm-yyyy"></label>
     <label title="Developer-weeks of Build work still to do, replacing the estimate from complexity. Use this for a use case already part-way through Build. Blank = use complexity.">Build dev-weeks left <input type="number" min="0" data-k="effortOverride" placeholder="auto" value="${it.effortOverride ?? ''}"></label>
     <label title="Most developers on this use case at once. Blank = use the global Max per use case.">Max devs <input type="number" min="0.5" step="0.5" data-k="teamCap" placeholder="default" value="${it.teamCap ?? ''}"></label>
@@ -434,7 +451,7 @@ function update() {
     ? `<span class="warn">No developers — engineering can't be scheduled</span>`
     : `<b>${plan.rows.length}</b> use cases · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
       (fc ? ` · <span title="Monte Carlo: ${fc.iterations} simulated runs sampling effort between best and worst case">50%: <b>${fmt(fc.p50.date)}</b> · 80%: <b>${fmt(fc.p80.date)}</b> · 90%: <b>${fmt(fc.p90.date)}</b></span>` : '') +
-      (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the clock has not started, so these are not in the plan">${plan.triage} in triage</span>` : '') +
+      (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the delivery clock has not started. These are predicted assuming triage takes its estimated weeks (Setup tab), so their dates are tentative.">${plan.triage} in triage (tentative)</span>` : '') +
       (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '');
   plan.rows.forEach(r => {
     const tr = document.querySelector(`tr[data-id="${r.id}"]`); if (!tr) return;
@@ -444,7 +461,7 @@ function update() {
       if (r.reuseApplied) { td.textContent += ` · reuse saves ${wk(r.reuseSaved)} dev-wks`; td.title = 'Reuse of existing components reduced Build effort'; }
       else if (r.reusePending) { td.textContent += ' · reuse pending'; td.title = 'Builds on a use case whose Build is not finished when this one starts, so no reuse saving yet'; }
       else td.title = ''; }
-    tr.querySelector('[data-c=end]').textContent = r.endDate ? fmt(r.endDate) : (r.triage ? 'Not started' : '—');
+    tr.querySelector('[data-c=end]').textContent = r.endDate ? (r.triage ? '~' : '') + fmt(r.endDate) : '—';
     const f = fc && fc.rows[r.id]; tr.querySelector('[data-c=p80]').textContent = f ? fmt(f.p80Date) : '—';
   });
   renderGantt();
@@ -460,10 +477,182 @@ function update() {
   }, 400);
 }
 
+
+/* ---- spreadsheet-style editing in the Gantt table: select, copy / paste, fill handle, delete, undo ---- */
+const COLKEY = { 2: 'stage', 3: 'priority', 4: 'complexity', 5: 'sme', 6: 'reuse' };   // editable columns (indexes in cols())
+const C_FIRST = 2, C_LAST = 6;
+let gsel = null;         // { anchor:{c,id}, cur:{c,id}, c0, c1, ids:[] }  - rows tracked by id so re-sorting can't move them
+let fillPrev = null;     // { p0, p1 } rows previewed while dragging the fill handle
+const undoStack = [];
+const rowPos = id => plan.rows.findIndex(r => r.id === id);
+const itemOf = id => state.items.find(i => i.id === id);
+const pushUndo = () => { undoStack.push(JSON.stringify(state.items)); if (undoStack.length > 40) undoStack.shift(); };
+function undo() {
+  if (!undoStack.length) return gmsg('Nothing to undo');
+  state.items = JSON.parse(undoStack.pop()); Scheduler.normalize(state); renderRows(); update(); gmsg('Undone');
+}
+let gmsgTimer;
+function gmsg(t) { const el = $('#gmsg'); if (!el) return; el.textContent = t; clearTimeout(gmsgTimer); gmsgTimer = setTimeout(() => { el.textContent = ''; }, 4500); }
+
+function setRange(a, b) {   // a, b = { c, p } (column index, row position)
+  const c0 = Math.min(a.c, b.c), c1 = Math.max(a.c, b.c), lo = Math.min(a.p, b.p), hi = Math.max(a.p, b.p);
+  gsel = { anchor: { c: a.c, id: plan.rows[a.p].id }, cur: { c: b.c, id: plan.rows[b.p].id }, c0, c1, ids: plan.rows.slice(lo, hi + 1).map(r => r.id) };
+}
+const cellPos = el => ({ c: Number(el.dataset.ci), p: Number(el.dataset.p) });
+const gridActive = () => gsel && $('#gantt').contains(document.activeElement) && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+const cellText = (it, key) => key === 'stage' ? (it.stage === TRIAGE ? 'Stakeholder Triage' : (state.config.stages.find(s => s.id === it.stage) || {}).name || '')
+  : key === 'priority' ? String(it.priority ?? '')
+  : key === 'complexity' ? (state.config.complexities.find(c => c.key === it.complexity) || {}).name || ''
+  : SME_LABEL[it[key]] || '';
+// Parse pasted text for a column. Returns { ok, value }.
+function parseCell(key, text) {
+  const t = String(text ?? '').trim();
+  if (key === 'stage') { const v = matchStage(t); return v ? { ok: true, value: v } : { ok: false }; }
+  if (key === 'priority') { if (t === '') return { ok: true, value: null }; const v = parsePriority(t); return v == null ? { ok: false } : { ok: true, value: v }; }
+  if (key === 'complexity') { const v = matchComplexity(t); return v ? { ok: true, value: v } : { ok: false }; }
+  if (t === '' || t === '-' || t === '–' || /^none$/i.test(t)) return { ok: true, value: null };
+  const v = parseSme(t); return v ? { ok: true, value: v } : { ok: false };
+}
+const selRowsOrdered = () => gsel.ids.map(rowPos).filter(p => p >= 0).sort((a, b) => a - b);
+function commit(msg) { renderRows(); update(); gmsg(msg); }
+
+function copySelection() {
+  const lines = selRowsOrdered().map(p => { const it = itemOf(plan.rows[p].id); const out = [];
+    for (let c = gsel.c0; c <= gsel.c1; c++) out.push(cellText(it, COLKEY[c])); return out.join('\t'); });
+  return lines.join('\n');
+}
+function pasteText(text) {
+  const ps = selRowsOrdered(); if (!ps.length) return;
+  let rows = String(text).replace(/\r/g, '').split('\n'); if (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
+  const grid = rows.map(r => r.split('\t')); let ok = 0, bad = 0;
+  pushUndo();
+  const put = (id, c, val) => { const key = COLKEY[c], r = parseCell(key, val); if (!r.ok) { bad++; return; } itemOf(id)[key] = r.value; ok++; };
+  if (grid.length === 1 && grid[0].length === 1 && (ps.length > 1 || gsel.c1 > gsel.c0)) {
+    gsel.ids.forEach(id => { for (let c = gsel.c0; c <= gsel.c1; c++) put(id, c, grid[0][0]); });   // one value fills the whole selection
+  } else {
+    const p0 = ps[0], c0 = gsel.c0, width = Math.max(...grid.map(r => r.length));
+    grid.forEach((row, ri) => { const r = plan.rows[p0 + ri]; if (r) row.forEach((v, ci) => { if (c0 + ci <= C_LAST) put(r.id, c0 + ci, v); }); });
+    const p1 = Math.min(plan.rows.length - 1, p0 + grid.length - 1);
+    setRange({ c: c0, p: p0 }, { c: Math.min(C_LAST, c0 + width - 1), p: p1 });   // select what was pasted
+  }
+  commit(`Pasted ${ok} value${ok === 1 ? '' : 's'}` + (bad ? `; ${bad} not recognised and skipped` : ''));
+}
+function clearSelection() {   // Delete: blank optional columns (priority, SME, reuse); stage and complexity can't be blank
+  pushUndo(); let n = 0;
+  gsel.ids.forEach(id => { for (let c = gsel.c0; c <= gsel.c1; c++) { const k = COLKEY[c]; if (k === 'priority' || k === 'sme' || k === 'reuse') { itemOf(id)[k] = null; n++; } } });
+  commit(n ? `Cleared ${n} value${n === 1 ? '' : 's'}` : 'Stage and complexity cannot be blank');
+}
+// Copy the selected block into target rows (fill handle / Ctrl+D). Sources repeat in order.
+function fillRows(sourcePos, targetPos) {
+  pushUndo(); let n = 0;
+  const src = sourcePos.map(p => itemOf(plan.rows[p].id)), lo = sourcePos[0];
+  targetPos.forEach(tp => {
+    const k = tp > sourcePos[sourcePos.length - 1] ? (tp - lo) % src.length : (src.length - 1 - ((lo - 1 - tp) % src.length));
+    const s = src[k], d = itemOf(plan.rows[tp].id);
+    for (let c = gsel.c0; c <= gsel.c1; c++) { d[COLKEY[c]] = s[COLKEY[c]]; n++; }
+  });
+  const all = [...sourcePos, ...targetPos]; const a = Math.min(...all), b = Math.max(...all);
+  setRange({ c: gsel.c0, p: a }, { c: gsel.c1, p: b });
+  commit(`Filled ${targetPos.length} row${targetPos.length === 1 ? '' : 's'}`);
+}
+
+function bindGrid(g) {
+  g.setAttribute('tabindex', '0');
+  // mouse: click / drag to select, shift-click to extend, drag the handle to fill
+  g.addEventListener('mousedown', e => {
+    const fh = e.target.closest('[data-fill]'), cell = e.target.closest('[data-cell]');
+    if (fh && gsel) {
+      e.preventDefault(); g.focus({ preventScroll: true });
+      const ps = selRowsOrdered(), pmin = ps[0], pmax = ps[ps.length - 1], svgTop = g.querySelector('.gleft svg').getBoundingClientRect().top;
+      const posAt = ev => Math.max(0, Math.min(plan.rows.length - 1, Math.floor((ev.clientY - svgTop - HH) / RH) - 1));
+      let raf = 0;
+      const mv = ev => { const tp = posAt(ev);
+        fillPrev = tp > pmax ? { p0: pmax + 1, p1: tp } : tp < pmin ? { p0: tp, p1: pmin - 1 } : null;
+        cancelAnimationFrame(raf); raf = requestAnimationFrame(renderGantt); };
+      const up = ev => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+        const fp = fillPrev; fillPrev = null;
+        if (fp) { const t = []; for (let p = fp.p0; p <= fp.p1; p++) t.push(p); fillRows(ps, t); } else renderGantt(); };
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+      return;
+    }
+    if (!cell) return;
+    e.preventDefault(); g.focus({ preventScroll: true });
+    const here = cellPos(cell);
+    if (e.shiftKey && gsel) { const a = { c: gsel.anchor.c, p: Math.max(0, rowPos(gsel.anchor.id)) }; setRange(a, here); }
+    else setRange(here, here);
+    renderGantt();
+    const anchor = { c: gsel.anchor.c, p: rowPos(gsel.anchor.id) }; let moved = false;
+    const mv = ev => { const t = document.elementFromPoint(ev.clientX, ev.clientY), c = t && t.closest && t.closest('[data-cell]');
+      if (!c) return;
+      const cp = cellPos(c);
+      if (cp.c !== anchor.c || cp.p !== anchor.p) moved = true;
+      if (moved) { setRange(anchor, cp); renderGantt(); } };
+    const up = ev => {
+      window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+      if (moved || e.shiftKey) return;   // a drag / shift-click just selects; a plain click also opens the dropdown
+      const el = g.querySelector(`[data-cell][data-ci="${anchor.c}"][data-p="${anchor.p}"]`); if (el) pickField(el);
+    };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  });
+  // keyboard
+  g.addEventListener('keydown', e => {
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || !gsel) return;
+    const mod = e.ctrlKey || e.metaKey, k = e.key;
+    if (mod && k.toLowerCase() === 'z') { e.preventDefault(); return undo(); }
+    if (mod && k.toLowerCase() === 'd') {   // fill down from the top row of the selection
+      e.preventDefault(); const ps = selRowsOrdered(); if (ps.length < 2) return;
+      return fillRows([ps[0]], ps.slice(1));
+    }
+    if (k === 'Escape') { gsel = null; return renderGantt(); }
+    if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); return clearSelection(); }
+    const cur = { c: gsel.cur.c, p: Math.max(0, rowPos(gsel.cur.id)) };
+    if (k === 'Enter' || k === 'F2') { e.preventDefault(); const c = g.querySelector(`[data-cell][data-ci="${cur.c}"][data-p="${cur.p}"]`); return c && pickField(c); }
+    const d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[k]; if (!d) return;
+    e.preventDefault();
+    const n = { c: Math.min(C_LAST, Math.max(C_FIRST, cur.c + d[0])), p: Math.min(plan.rows.length - 1, Math.max(0, cur.p + d[1])) };
+    if (e.shiftKey) setRange({ c: gsel.anchor.c, p: Math.max(0, rowPos(gsel.anchor.id)) }, n); else setRange(n, n);
+    renderGantt();
+  });
+}
+// Clipboard (works with Excel / Sheets: tab-separated cells, one row per line)
+document.addEventListener('copy', e => {
+  if (!gridActive()) return;
+  e.clipboardData.setData('text/plain', copySelection()); e.preventDefault();
+  gmsg(`Copied ${gsel.ids.length} row${gsel.ids.length === 1 ? '' : 's'} × ${gsel.c1 - gsel.c0 + 1} column${gsel.c1 > gsel.c0 ? 's' : ''}`);
+});
+document.addEventListener('cut', e => {
+  if (!gridActive()) return;
+  e.clipboardData.setData('text/plain', copySelection()); e.preventDefault(); clearSelection();
+});
+document.addEventListener('paste', e => {
+  if (!gridActive()) return;
+  e.preventDefault(); pasteText(e.clipboardData.getData('text/plain'));
+});
+document.addEventListener('mousedown', e => {   // clicking away drops the selection
+  // Use the event's original path: the grid re-renders during its own mousedown, so e.target may already be detached.
+  const path = e.composedPath ? e.composedPath() : [];
+  if (gsel && !path.includes($('#gantt')) && !path.some(n => n.tagName === 'DIALOG')) { gsel = null; if (activeTab === 'timeline') renderGantt(); }
+});
+
 /* ---- Gantt: one SVG design used for both screen and PNG export ---- */
 const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
+// Mouse-over explanations for the table columns (Gantt header and Use cases table).
+const COLHELP = {
+  id: 'SharePoint ID of the use case (or its row number if it has none). Click the ID or name to open the SharePoint item.',
+  name: 'Name of the use case.',
+  stage: 'Current stage: 0. Stakeholder Triage, then the pipeline stages in order. Earlier stages are skipped; triage is predicted after its estimated weeks. Double-click a cell to change it.',
+  pri: 'Priority, 1 = highest. Rows are ordered by most advanced stage first, then priority, and developers are handed out in that order.',
+  cx: 'Complexity of the use case. It sets the Build effort in developer-weeks (see Engineering size on the Setup tab).',
+  sme: 'SME required: how much subject-matter-expert time the use case needs (H / M / L). Higher stretches the SME-flagged stages.',
+  reuse: 'Reuse: how much of the plumbing already exists from earlier deliveries (H / M / L). Higher reduces Build effort.',
+  dur: 'Predicted elapsed weeks from when work starts to when the use case finishes.',
+  start: 'Predicted date work starts (the first stage after any triage period). ~ marks a tentative date for a use case still in Stakeholder Triage.',
+  end: 'Predicted finish date at the end of the last stage. ~ marks a tentative date for a use case still in Stakeholder Triage.',
+  eng: 'Predicted Build dates. "queued" = waiting for a free developer; "reuse saves" = dev-weeks saved by reuse; "reuse pending" = it builds on a use case whose Build is not finished yet.',
+  p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
+};
 // Timeline table columns: every width is draggable and remembered in this browser.
 const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dur: 66, start: 88, end: 88 };
 const COL_MIN = 30, COL_MAX = 700;
@@ -523,7 +712,7 @@ function leftRows(ui = true) {
       return { itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
   return rows.map((r, i) => {
-    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? shortDate(r.start) : '—', r.end ? shortDate(r.end) : (r.none || '—')];
+    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; }
     return { ...r, vals };
   });
@@ -532,23 +721,34 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="11" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
+  const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
+  if (selPos.length) {   // shade selected cells under the text
+    const sx = xs[gsel.c0], sw = xs[gsel.c1] + cs[gsel.c1][1] - sx;
+    selPos.forEach(p => { o += `<rect x="${sx}" y="${HH + (p + 1) * RH}" width="${sw}" height="${RH}" fill="rgba(47,111,237,.16)" pointer-events="none"/>`; });
+  }
   leftRows(ui).forEach((r, i) => {
     const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
     o += `<line x1="0" x2="${W}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
-      const dim = r.triage && k > 1;
+      const dim = r.triage && k === 2;
       const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="11.5" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : t;
     });
-    if (ui && i > 0) {
-      const hit = (kind, k, tip) => `<rect data-pick="${kind}" data-id="${esc(r.itemId)}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>${tip}</title></rect>`;
-      o += hit('stage', 2, 'Change stage') + hit('cx', 4, 'Change complexity') + hit('sme', 5, 'Change SME required (H / M / L)') + hit('reuse', 6, 'Change reuse of existing components (H / M / L)');
+    if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
+      const hit = (kind, k) => `<rect data-cell data-ci="${k}" data-p="${i - 1}" data-id="${esc(r.itemId)}" data-pick="${kind}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Click to change · drag to select a range (then Ctrl/Cmd+C, Ctrl/Cmd+V) · shift-click extends</title></rect>`;
+      o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6);
     }
   });
+  if (selPos.length) {   // outline + fill handle
+    const sx = xs[gsel.c0], sw = xs[gsel.c1] + cs[gsel.c1][1] - sx, pmin = selPos[0], pmax = selPos[selPos.length - 1];
+    o += `<rect x="${sx + 1}" y="${HH + (pmin + 1) * RH + 1}" width="${sw - 2}" height="${(pmax - pmin + 1) * RH - 2}" fill="none" stroke="#2f6fed" stroke-width="2" pointer-events="none"/>`;
+    if (fillPrev) o += `<rect x="${sx + 1}" y="${HH + (fillPrev.p0 + 1) * RH + 1}" width="${sw - 2}" height="${(fillPrev.p1 - fillPrev.p0 + 1) * RH - 2}" fill="rgba(47,111,237,.08)" stroke="#2f6fed" stroke-dasharray="4 3" pointer-events="none"/>`;
+    o += `<rect data-fill x="${sx + sw - 5}" y="${HH + (pmax + 2) * RH - 5}" width="9" height="9" fill="#2f6fed" stroke="#fff" stroke-width="1.5" style="cursor:ns-resize"><title>Drag up or down to copy these values into other rows</title></rect>`;
+  }
   return `<line x1="0" x2="${W}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;
 }
 
@@ -581,13 +781,16 @@ function rightSVG(L) {
       const x = L.XW(b.start), w = Math.max(2, L.XW(b.end) - x);
       const tip = `<title>${esc(r.name)} — ${esc(b.name)}: ${esc(shortDate(b.startDate))} → ${esc(shortDate(b.endDate))} (${wk(b.end - b.start)} wks)</title>`;
       if (b.type === 'queue') o += `<g>${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
-      else {
-        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
+      else if (b.type === 'triage') {
+        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
+        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
+        o += '</g>';
+      } else {
+        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
         if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="10" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
         o += '</g>';
       }
     });
-    if (r.triage) o += `<text x="${L.XW(0) + 8}" y="${y + RH / 2 + 4}" font-size="11" font-style="italic" fill="#8a94a3">Stakeholder Triage: clock not started</text>`;
     const f = fc && fc.rows[r.id];
     if (f && r.end != null && f.p80 > r.end + 0.05) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;
@@ -614,7 +817,7 @@ function renderGantt() {
 }
 function legendItems() {
   return [...state.config.stages.map((s, i) => ({ c: pal(i), t: s.name })),
-    { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }];
+    { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }];
 }
 
 function downloadPNG() {

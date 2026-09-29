@@ -65,15 +65,25 @@ assert.ok(r.rows[3].bars[0].type === 'queue' || r.rows[3].bars[0].start > 0);
 assert.ok(r.totalWeeks > schedule(state(4, ['low', 'low', 'low', 'low'])).totalWeeks);
 
 /* ---- stages, triage, ordering ---- */
-// Stakeholder Triage: clock not started - no bars, not counted, not "unscheduled".
+// Stakeholder Triage: the clock has not started, but the timeline is still predicted. The use case enters
+// the first stage after an estimated triage period (default 4 weeks), with a tentative 'triage' bar first.
 c = state(4, ['low', 'low']);
 c.items[1].stage = TRIAGE;
 r = schedule(c);
 assert.strictEqual(r.triage, 1);
 assert.strictEqual(r.unscheduled, 0);
-assert.strictEqual(row(r, 'x1').bars.length, 0);
-assert.strictEqual(row(r, 'x1').end, null);
-assert.strictEqual(r.totalWeeks, schedule(state(4, ['low'])).totalWeeks);
+const tri = row(r, 'x1');
+assert.strictEqual(tri.bars[0].type, 'triage');
+assert.strictEqual(tri.bars[0].end, 4);
+assert.strictEqual(tri.bars.find(b => b.key === 'ideation').start, 4);     // work starts when triage ends
+assert.ok(eng(tri) && tri.end != null);                                     // full predicted timeline
+assert.ok(tri.end > row(r, 'x0').end);                                      // triage is behind started work
+c.items[1].triageWeeks = 7; assert.strictEqual(row(schedule(c), 'x1').bars.find(b => b.key === 'ideation').start, 7);
+c.items[1].triageWeeks = null; c.config.triageWeeks = 2; assert.strictEqual(row(schedule(c), 'x1').bars.find(b => b.key === 'ideation').start, 2);
+c.config.triageWeeks = 0; assert.strictEqual(row(schedule(c), 'x1').bars.some(b => b.type === 'triage'), false);
+// Triage never takes developers or WIP slots from work already under way.
+c = state(2, ['high', 'high']); c.items[0].stage = 'eng'; c.items[1].stage = TRIAGE; c.config.wipLimit = 1;
+assert.strictEqual(eng(row(schedule(c), 'x0')).start, 0);
 
 // Current stage: earlier stages are skipped, so the item finishes sooner.
 c = state(4, ['low']);
@@ -105,7 +115,7 @@ c.items[2].stage = 'ideation';  c.items[2].priority = 2;
 c.items[3].stage = TRIAGE;      c.items[3].priority = 1;
 c.items[4].stage = 'eng';       c.items[4].priority = 3;
 assert.deepStrictEqual(orderItems(c).map(i => i.id), ['x4', 'x1', 'x0', 'x2', 'x3']);
-assert.deepStrictEqual(schedule(c).rows.map(x => x.id), ['x4', 'x1', 'x0', 'x2', 'x3']);
+assert.deepStrictEqual(schedule(c).rows.map(x => x.id), ['x4', 'x1', 'x0', 'x2', 'x3']);   // triage row still sorts last
 c.items[2].priority = null; // no priority sorts after numbered ones
 assert.deepStrictEqual(orderItems(c).map(i => i.id).slice(2, 4), ['x0', 'x2']);
 

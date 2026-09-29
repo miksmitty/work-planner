@@ -103,3 +103,5 @@ input.pri { width:54px; }
 
 .reusetag { background:#0e9f6e; }
 #reusef input { width:60px; }
+
+#gantt:focus { outline:none; }

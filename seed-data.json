@@ -5,6 +5,7 @@
     "defaultTeamCap": 2,
     "teamOverhead": 0.1,
     "wipLimit": 10,
+    "triageWeeks": 4,
     "smeFactors": {
       "L": 1,
       "M": 1.25,

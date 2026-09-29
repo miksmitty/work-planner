@@ -37,6 +37,7 @@
     <div class="card gcard">
       <div class="toolbar">
         <span class="hint">Hatched = waiting (capacity or developers) · dotted tail = time to reach 80% confidence</span>
+        <span class="hint" id="gmsg" style="color:#2f6fed;font-weight:600"></span>
         <span class="grow"></span>
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
         <label class="hint" title="Scale the chart to fill the window. Untick (or use Zoom) to scroll sideways at a fixed scale"><input type="checkbox" id="fit" checked> Fit to width</label>
@@ -44,6 +45,7 @@
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
         <button id="png" class="primary">Download PNG</button>
       </div>
+      <div class="hint" style="margin-top:6px">Table editing: click a cell to change it · drag (or shift-click) to select a range, then <b>Ctrl/Cmd+C</b> copy · <b>Ctrl/Cmd+V</b> paste (also from Excel) · drag the square handle at the corner of the selection to copy values down or up · <b>Ctrl/Cmd+D</b> fill down · <b>Delete</b> clears · <b>Enter</b> edits the active cell · <b>Esc</b> closes a dropdown · <b>Ctrl/Cmd+Z</b> undo</div>
       <div id="gantt"></div>
       <div class="legend" id="legend"></div>
     </div>
@@ -61,7 +63,20 @@
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
-        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low)">SME req.</th><th title="Reuse: how much of the plumbing this use case can build on already exists (High / Medium / Low)">Reuse</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
+        <thead><tr>
+          <th title="Row number in the current order (most advanced stage first, then priority)">#</th>
+          <th title="SharePoint ID. Click to open the item; the link comes from the item's own URL or the Base URL on the Setup tab.">ID</th>
+          <th title="Name of the use case">Name</th>
+          <th title="Current stage. 0. Stakeholder Triage means the delivery clock has not started; it is predicted after the estimated triage weeks. Earlier stages than the current one are skipped.">Stage</th>
+          <th title="Priority, 1 = highest. Sorted by most advanced stage first, then priority; developers are handed out in the same order.">Priority</th>
+          <th title="Complexity. Sets the Build effort in developer-weeks (Engineering size on the Setup tab).">Complexity</th>
+          <th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low). Higher stretches the SME-flagged stages.">SME req.</th>
+          <th title="Reuse: how much of the plumbing already exists from earlier deliveries (High / Medium / Low). Higher reduces Build effort.">Reuse</th>
+          <th title="Predicted Build dates. 'queued' = waiting for a free developer; 'reuse saves' = dev-weeks saved; 'reuse pending' = builds on a use case not yet built.">Engineering</th>
+          <th title="Predicted finish date. ~ = tentative (still in Stakeholder Triage).">Planned finish</th>
+          <th title="Date the use case is 80% likely to be finished by (Monte Carlo forecast).">80% confident</th>
+          <th></th>
+        </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -72,7 +87,7 @@
       <div class="row">
         <div class="lbl">Stages</div>
         <div class="chips" id="stages"></div>
-        <p class="hint help">The steps every use case goes through, in order. <b>Stakeholder Triage (0)</b> comes before them and is not a scheduled stage: while a use case is there the clock has not started (it is being refined with the submitter before approval), so it is left out of the plan. Set each use case's current stage on the Use cases tab or in the Gantt, and earlier stages are skipped. Type a stage's default length in weeks (a fixed timebox). Hover a stage for ◀ ▶ to reorder, ✕ to remove, or ⚙ to make it the <b>engineering</b> stage, whose length is not fixed but comes from the use case's size and the developers available. Any use case can override a stage under "details" on the Use cases tab.</p>
+        <p class="hint help">The steps every use case goes through, in order. <b>Stakeholder Triage (0)</b> comes before them: while a use case is there the delivery clock has not started (it is being refined with the submitter before approval). It is still predicted: set the estimated triage weeks on the Stakeholder Triage box (or per use case under "details"), and the plan shows a tentative triage bar followed by the full timeline, ranked behind work already under way. Set each use case's current stage on the Use cases tab or in the Gantt, and earlier stages are skipped. Type a stage's default length in weeks (a fixed timebox). Hover a stage for ◀ ▶ to reorder, ✕ to remove, or ⚙ to make it the <b>engineering</b> stage, whose length is not fixed but comes from the use case's size and the developers available. Any use case can override a stage under "details" on the Use cases tab.</p>
       </div>
       <div class="row">
         <div class="lbl">Engineering size</div>

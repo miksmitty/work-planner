@@ -59,6 +59,7 @@
         defaultTeamCap: 2,
         teamOverhead: 0.1,
         wipLimit: 6,
+        triageWeeks: 4,
         smeFactors: DEFAULT_SME(),
         smeSemantics: 'required',
         reuseFactors: DEFAULT_REUSE(),
@@ -87,6 +88,7 @@
     }
     if (c.teamOverhead == null) c.teamOverhead = 0.1;
     if (c.wipLimit == null) c.wipLimit = 6;
+    if (c.triageWeeks == null) c.triageWeeks = 4;
     if (!c.smeFactors) { c.smeFactors = DEFAULT_SME(); c.smeSemantics = 'required'; }
     if (c.smeSemantics !== 'required') {
       // Upgrade from the short-lived "SME availability" meaning (High = no delay) to "SME required"
@@ -109,6 +111,7 @@
       if (it.stage !== TRIAGE && !c.stages.some(s => s.id === it.stage)) it.stage = first; // missing / removed stage
       if (it.priority === undefined || it.priority === '') it.priority = null;
       if (it.stageStart === undefined) it.stageStart = null;
+      if (it.triageWeeks === undefined || it.triageWeeks === '') it.triageWeeks = null;
       if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
       if (!it.buildsOn) it.buildsOn = null;
@@ -157,15 +160,19 @@
     };
 
     const rows = items.map(it => {
-      const cur = stageRank(state, it), triage = cur < 0;
+      const rank = stageRank(state, it), triage = rank < 0, cur = triage ? 0 : rank;   // triage is projected as entering stage 1 once triage ends
       // Time already spent in the current stage before the plan starts.
-      const since = it.stageStart ? (start - parseDate(it.stageStart)) / (7 * DAY) : 0;
+      const since = it.stageStart && !triage ? (start - parseDate(it.stageStart)) / (7 * DAY) : 0;
       let earliest = it.earliestStart ? Math.max(0, Math.round((parseDate(it.earliestStart) - start) / (7 * DAY))) : 0;
       if (since < 0) earliest = Math.max(earliest, Math.round(-since));
+      // Stakeholder Triage: the clock has not started, but we still predict the timeline by assuming triage
+      // takes an estimated number of weeks (per use case, else the default) before work begins.
+      const triageW = triage ? Math.max(0, Math.ceil(Number(it.triageWeeks != null ? it.triageWeeks : config.triageWeeks) || 0)) : 0;
+      if (triage) earliest = Math.max(earliest, triageW);
       const elapsed = Math.max(0, since);
       const durOf = (s, i) => { const w = weeksFor(it, s); return i === cur && i !== engIdx ? Math.max(0, w - elapsed) : w; };
       const pastEng = engIdx >= 0 && cur > engIdx;
-      const hasEng = engIdx >= 0 && !triage && !pastEng;
+      const hasEng = engIdx >= 0 && !pastEng;
       const sumDur = (from, to) => { let a = 0; for (let i = from; i < to; i++) a += durOf(stages[i], i); return a; };
       let effort = 0, reuseOnEffort = 1;
       if (hasEng) {
@@ -178,15 +185,15 @@
       }
       const cap = Math.max(0.1, Number(it.teamCap) || Number(config.defaultTeamCap) || 1);
       return {
-        item: it, cur, triage, durOf, pastEng, effort, effortBase: effort, reuseOnEffort, reuseApplied: false, dep: it.buildsOn || null,
+        item: it, cur, triage, triageW, durOf, pastEng, effort, effortBase: effort, reuseOnEffort, reuseApplied: false, dep: it.buildsOn || null,
         cap, remaining: effort, earliest,
         forced: !triage && (cur > 0 || !!it.stageStart),   // already under way: never held back by the WIP limit
         pre: hasEng ? sumDur(cur, engIdx) : 0,
-        post: engIdx < 0 || triage ? 0 : sumDur(Math.max(cur, engIdx + 1), stages.length),
+        post: engIdx < 0 ? 0 : sumDur(Math.max(cur, engIdx + 1), stages.length),
         started: false, startWk: null, readyAt: Infinity, engStart: null, engEnd: null, finish: null,
       };
     });
-    const active = rows.filter(r => !r.triage);
+    const active = rows;   // triage rows are predicted too (they enter after their triage period, behind everything else)
     const rowById = Object.fromEntries(rows.map(r => [r.item.id, r]));
 
     if (engIdx < 0) {
@@ -233,11 +240,12 @@
     const out = rows.map(r => {
       const it = r.item, bars = [];
       const stageName = r.triage ? 'Stakeholder Triage' : (stages[r.cur] || {}).name || '';
-      const base = { id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, sme: it.sme, reuse: it.reuse, buildsOn: it.buildsOn, triage: r.triage };
-      if (r.triage) return { ...base, effort: 0, teamCap: r.cap, scheduled: false, queueWeeks: null, bars: [], end: null, endDate: null };
+      const base = { triageWeeks: r.triageW, id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName, priority: it.priority, sme: it.sme, reuse: it.reuse, buildsOn: it.buildsOn, triage: r.triage };
       const scheduled = r.started && (engIdx < 0 || r.engEnd !== null);
       let t = r.startWk ?? r.earliest;
-      if (r.started && r.startWk > r.earliest) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: r.earliest, end: r.startWk });
+      if (r.triage && r.triageW > 0) bars.push({ key: 'triage', stageId: null, name: 'Stakeholder Triage (estimated)', type: 'triage', start: 0, end: r.triageW });
+      const waitFrom = r.triage ? r.triageW : r.earliest;
+      if (r.started && r.startWk > waitFrom) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: waitFrom, end: r.startWk });
       const push = (s, i, a, b) => { if (b > a) bars.push({ key: s.id, stageId: s.id, stageIdx: i, name: s.name, type: 'stage', start: a, end: b }); };
       if (r.started) for (let i = r.cur; i < stages.length; i++) {
         const s = stages[i];
@@ -270,7 +278,7 @@
       endDate: fmtDate(addWeeks(start, overallEnd)),
       totalEffort: rows.reduce((s, r) => s + r.effort, 0),
       triage: out.filter(r => r.triage).length,
-      unscheduled: out.filter(r => !r.triage && !r.scheduled).length,
+      unscheduled: out.filter(r => !r.scheduled).length,
     };
   }
 
