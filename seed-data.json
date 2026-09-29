@@ -6,10 +6,11 @@
     "teamOverhead": 0.1,
     "wipLimit": 10,
     "smeFactors": {
-      "H": 1,
+      "L": 1,
       "M": 1.25,
-      "L": 1.6
+      "H": 1.6
     },
+    "smeSemantics": "required",
     "stages": [
       {
         "id": "ideation",

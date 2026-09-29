@@ -152,11 +152,11 @@ function renderStages() {
   st.forEach((s, i) => {
     const eng = s.kind === 'eng';
     const el = document.createElement('div'); el.className = 'chip' + (eng ? ' eng' : ''); el.style.setProperty('--c', color(i));
-    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">${s.sme ? '<span class="smetag" title="This stage is stretched when SME availability is Medium or Low">SME</span>' : ''}
+    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">${s.sme ? '<span class="smetag" title="This stage is stretched for use cases that need Medium or High SME involvement">SME</span>' : ''}
       ${eng ? `<span class="by" title="Set by complexity and developers">by complexity</span>`
             : `<input type="number" min="0" step="1" value="${s.weeks ?? 0}" aria-label="Weeks"><span class="muted">wk</span>`}
       <span class="tools">
-        <button data-a="sme" title="${s.sme ? 'Stop' : 'Start'} stretching this stage by SME availability">SME</button><button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
+        <button data-a="sme" title="${s.sme ? 'Stop' : 'Start'} stretching this stage by how much SME time the use case needs">SME</button><button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
         ${eng ? '' : `<button data-a="eng" title="Make this the engineering stage (length driven by complexity &amp; developers)">⚙</button><button data-a="del" title="Remove stage">✕</button>`}
       </span>`;
     const [name, weeks] = el.querySelectorAll('input');   // number span is not an input
@@ -185,7 +185,7 @@ function renderSme() {
   const box = $('#smef'); box.innerHTML = '';
   ['H', 'M', 'L'].forEach(k => {
     const el = document.createElement('div'); el.className = 'chip';
-    el.innerHTML = `<span>${SME_LABEL[k]}</span><span class="muted">×</span><input type="number" min="1" max="5" step="0.05" value="${state.config.smeFactors[k]}" aria-label="${SME_LABEL[k]} availability factor">`;
+    el.innerHTML = `<span>${SME_LABEL[k]}</span><span class="muted">×</span><input type="number" min="1" max="5" step="0.05" value="${state.config.smeFactors[k]}" aria-label="${SME_LABEL[k]} SME requirement factor">`;
     el.querySelector('input').oninput = e => { state.config.smeFactors[k] = Math.max(0.1, Number(e.target.value) || 1); update(); };
     box.appendChild(el);
   });
@@ -215,7 +215,7 @@ function renderRows() {
       <td><select data-f="stage">${stageOptions(it.stage)}</select></td>
       <td><input type="number" class="pri" min="1" step="1" data-f="priority" placeholder="–" value="${it.priority ?? ''}"></td>
       <td><select data-f="complexity">${opts}</select></td>
-      <td><select data-f="sme" title="SME availability">${smeOptions(it.sme)}</select></td>
+      <td><select data-f="sme" title="SME required: how much subject-matter-expert time this use case needs">${smeOptions(it.sme)}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
@@ -285,7 +285,7 @@ const GUESS = {
   url: /url|link|href|item ?path/i,
   stage: /stage|status|phase/i,
   priority: /priorit|rank/i,
-  sme: /sme|expert|availab/i,
+  sme: /sme|expert/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -313,7 +313,7 @@ function parsePriority(val) {
   const w = { critical: 1, urgent: 1, high: 1, medium: 2, normal: 2, med: 2, low: 3 }; 
   const k = Object.keys(w).find(x => v.includes(x)); return k ? w[k] : null;
 }
-// SME availability: H / M / L or High / Medium / Low.
+// SME required: H / M / L or High / Medium / Low.
 function parseSme(val) {
   const v = String(val || '').trim().toLowerCase(); if (!v) return null;
   if (v === 'h' || v.includes('high')) return 'H';
@@ -363,7 +363,7 @@ function showImport(rows, fileName) {
       <label>Item URL</label><select data-m="url">${opts(guess('url'))}</select>
       <label title="Stakeholder Triage / 0, a stage number 1-${state.config.stages.length}, or a stage name">Stage / status</label><select data-m="stage">${opts(guess('stage'))}</select>
       <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
-      <label title="SME availability: High / Medium / Low (or H / M / L)">SME availability</label><select data-m="sme">${opts(guess('sme'))}</select>
+      <label title="How much SME time the use case needs: High / Medium / Low (or H / M / L)">SME required</label><select data-m="sme">${opts(guess('sme'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
       <label>If ID already exists</label>
@@ -442,7 +442,7 @@ const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577
 const pal = i => PAL[i % PAL.length];
 const RH = 24, HH = 44, DAYMS = 86400000;
 let NAME_W = Math.min(700, Math.max(90, Number(lsGet('nameW')) || 206));
-const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['sme', 46, 'SME'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
+const cols = () => [['id', 56, 'ID'], ['name', NAME_W, 'Task name'], ['stage', 154, 'Stage'], ['pri', 40, 'Pri'], ['cx', 84, 'Complexity'], ['sme', 54, 'SME req'], ['dur', 66, 'Duration'], ['start', 88, 'Start'], ['end', 88, 'Finish']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -505,7 +505,7 @@ function leftSVG(L, ui = true) {
     if (ui && i > 0) {
       o += `<rect data-pick="stage" data-id="${esc(r.itemId)}" x="${xs[2]}" y="${y}" width="${cols()[2][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change stage</title></rect>`;
       o += `<rect data-pick="cx" data-id="${esc(r.itemId)}" x="${xs[4]}" y="${y}" width="${cols()[4][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change complexity</title></rect>`;
-      o += `<rect data-pick="sme" data-id="${esc(r.itemId)}" x="${xs[5]}" y="${y}" width="${cols()[5][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change SME availability (H / M / L)</title></rect>`;
+      o += `<rect data-pick="sme" data-id="${esc(r.itemId)}" x="${xs[5]}" y="${y}" width="${cols()[5][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Change SME required (H / M / L)</title></rect>`;
     }
   });
   return `<line x1="0" x2="${lw()}" y1="${HH}" y2="${HH}" stroke="#9aa3ad"/>` + o;

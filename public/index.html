@@ -60,7 +60,7 @@
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
-        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th title="Subject-matter-expert availability: High / Medium / Low">SME</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>ID</th><th>Name</th><th>Stage</th><th title="1 = highest. Sorted by most advanced stage first, then priority">Priority</th><th>Complexity</th><th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low)">SME req.</th><th>Engineering</th><th>Planned finish</th><th>80% confident</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -79,9 +79,9 @@
         <p class="hint help">Engineering effort for each complexity level, in developer-weeks: best case · most likely · worst case (weeks of one developer's work). The plan uses the weighted expected value, (best + 4×likely + worst) ÷ 6, shown after ≈. The 50/80/90% dates come from simulating many runs between best and worst case. Complexity is chosen per use case on the Use cases tab.</p>
       </div>
       <div class="row">
-        <div class="lbl">SME availability</div>
+        <div class="lbl">SME required</div>
         <div class="chips sizes" id="smef"></div>
-        <p class="hint help">How much each use case's subject-matter experts (SMEs) slow it down. Every use case is rated High, Medium or Low availability. Stages marked <b>SME</b> above (hover a stage and click SME to change them) have their length multiplied by the factor: High ×1 means no delay, Medium ×1.25 adds a quarter, Low ×1.6 adds 60%. On Build, the factor multiplies the developer-weeks of effort instead. A blank rating has no effect, and a length or effort you set yourself under a use case's "details" is used exactly as entered. Waiting on experts stretches elapsed time, not developer workload, so only the stages you flag are affected. The factors are assumptions; adjust them to match your experience.</p>
+        <p class="hint help">How much subject-matter-expert (SME) time each use case needs. Rate every use case <b>High</b>, <b>Medium</b> or <b>Low</b> for SME required: a use case that leans heavily on experts (reviews, data access, domain sign-off) spends more elapsed time waiting on them. Stages marked <b>SME</b> above (hover a stage and click SME to change them) have their length multiplied by the factor for that rating. Stage default lengths assume a light touch, so Low ×1 means no delay, Medium ×1.25 adds a quarter and High ×1.6 adds 60%. On Build, the factor multiplies the developer-weeks of effort instead. A blank rating has no effect, and a length or effort you set yourself under a use case's "details" is used exactly as entered. Only stages you flag are affected, because waiting on experts stretches elapsed time, not developer workload. The factors are assumptions; adjust them to match your experience.</p>
       </div>
       <div class="row">
         <div class="lbl">SharePoint links</div>

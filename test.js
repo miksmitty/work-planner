@@ -126,14 +126,14 @@ assert.strictEqual(eng(row(r, 'x0')).start, 0);
 assert.strictEqual(eng(row(r, 'x1')).start, 0);
 assert.ok(row(r, 'x2').bars[0].type === 'queue'); // ideation-stage item has to wait for a slot
 
-/* ---- SME availability ---- */
-// Factors: H 1.0, M 1.25, L 1.6 on SME-dependent stages (ideation, discovery, feasibility, release).
+/* ---- SME required ---- */
+// Factors: Low 1.0, Medium 1.25, High 1.6 on SME-dependent stages (ideation, discovery, feasibility, release).
 c = state(4, ['low']);
 const smeTotal = () => schedule(c).rows[0].bars.filter(b => b.type === 'stage' && b.key !== 'eng').reduce((a, b) => a + (b.end - b.start), 0);
 const neutral = smeTotal();
 assert.strictEqual(neutral, 2 + 2 + 4 + 3 + 2);                       // blank = no effect
-c.items[0].sme = 'H'; assert.strictEqual(smeTotal(), neutral);         // High = no delay
-c.items[0].sme = 'L';
+c.items[0].sme = 'L'; assert.strictEqual(smeTotal(), neutral);         // needs little SME time = no delay
+c.items[0].sme = 'H';
 assert.ok(Math.abs(smeTotal() - ((2 + 2 + 4 + 3) * 1.6 + 2)) < 1e-9);  // Operate is not SME-dependent
 assert.strictEqual(eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start, 3); // Build unaffected by default
 // Explicit override is used as entered.
@@ -144,14 +144,23 @@ c.config.stages.find(s => s.id === 'eng').sme = true;
 assert.ok(Math.abs((eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start) - 4.8) < 1e-9);
 c.items[0].effortOverride = 6;                                          // ...unless the effort is set explicitly
 assert.strictEqual(eng(schedule(c).rows[0]).end - eng(schedule(c).rows[0]).start, 3);
-// Lower availability never shortens the plan.
+// A higher SME requirement never shortens the plan.
 let last = 0;
-for (const a of ['H', 'M', 'L']) { c = state(4, ['low', 'medium']); c.items.forEach(i => i.sme = a); const w = schedule(c).totalWeeks; assert.ok(w >= last); last = w; }
-// Old data without smeFactors / flags is migrated.
-const nosme = defaultState(); delete nosme.config.smeFactors; nosme.config.stages.forEach(s => delete s.sme);
+for (const a of ['L', 'M', 'H']) { c = state(4, ['low', 'medium']); c.items.forEach(i => i.sme = a); const w = schedule(c).totalWeeks; assert.ok(w >= last); last = w; }
+// Data without factors gets the defaults; the earlier "availability" data is flipped, effect unchanged.
+const nosme = defaultState(); delete nosme.config.smeFactors; delete nosme.config.smeSemantics; nosme.config.stages.forEach(s => delete s.sme);
 schedule(nosme);
-assert.deepStrictEqual(nosme.config.smeFactors, { H: 1, M: 1.25, L: 1.6 });
+assert.deepStrictEqual(nosme.config.smeFactors, { L: 1, M: 1.25, H: 1.6 });
 assert.ok(nosme.config.stages.find(s => s.id === 'discovery').sme && !nosme.config.stages.find(s => s.id === 'eng').sme);
+const avail = state(4, ['low']);                                        // as saved by the availability version
+avail.config.smeFactors = { H: 1, M: 1.25, L: 1.6 }; delete avail.config.smeSemantics;
+avail.items[0].sme = 'L';                                               // Low availability = 60% delay
+const mig1 = schedule(avail).totalWeeks;
+assert.strictEqual(avail.items[0].sme, 'H');                            // ...is now High requirement
+assert.deepStrictEqual(avail.config.smeFactors, { L: 1, M: 1.25, H: 1.6 });
+assert.strictEqual(schedule(avail).totalWeeks, mig1);                   // migrating twice changes nothing
+// 1.6 x (2+2+4) = 12.8 weeks before Build; Build starts on a whole week (13), then 3 + 4.8 + 2.
+assert.ok(Math.abs(mig1 - (13 + 3 + 3 * 1.6 + 2)) < 1e-9);
 
 // Monte Carlo: ordered percentiles, reproducible, ignores triage rows.
 const d = defaultState();

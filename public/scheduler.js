@@ -22,8 +22,9 @@
   }
 
   const TRIAGE = 'triage';
-  // Stretch on SME-dependent stages by SME availability (High = no delay). Assumption, editable in the app.
-  const DEFAULT_SME = () => ({ H: 1, M: 1.25, L: 1.6 });
+  // SME REQUIRED by the use case: stretch applied to SME-dependent stages. Stage default lengths assume
+  // little SME involvement (Low = no delay). Assumption, editable in the app.
+  const DEFAULT_SME = () => ({ L: 1, M: 1.25, H: 1.6 });
   const DEFAULT_STAGES = () => [
     { id: 'ideation', name: 'Ideation', weeks: 2, sme: true },
     { id: 'discovery', name: 'Discovery', weeks: 2, sme: true },
@@ -54,6 +55,7 @@
         teamOverhead: 0.1,
         wipLimit: 6,
         smeFactors: DEFAULT_SME(),
+        smeSemantics: 'required',
         stages: DEFAULT_STAGES(),
         complexities: [
           { key: 'low', name: 'Low', min: 4, effort: 6, max: 10 },
@@ -79,7 +81,15 @@
     }
     if (c.teamOverhead == null) c.teamOverhead = 0.1;
     if (c.wipLimit == null) c.wipLimit = 6;
-    if (!c.smeFactors) c.smeFactors = DEFAULT_SME();
+    if (!c.smeFactors) { c.smeFactors = DEFAULT_SME(); c.smeSemantics = 'required'; }
+    if (c.smeSemantics !== 'required') {
+      // Upgrade from the short-lived "SME availability" meaning (High = no delay) to "SME required"
+      // (High = most delay), keeping every use case's effect unchanged.
+      const flip = { H: 'L', M: 'M', L: 'H' };
+      state.items.forEach(it => { if (flip[it.sme]) it.sme = flip[it.sme]; });
+      c.smeFactors = { H: c.smeFactors.L, M: c.smeFactors.M, L: c.smeFactors.H };
+      c.smeSemantics = 'required';
+    }
     c.stages.forEach(st => { if (st.sme === undefined) st.sme = ['ideation', 'discovery', 'feasibility', 'release'].includes(st.id); });
     c.complexities.forEach(x => {
       if (x.min == null) x.min = Math.round(x.effort * 0.7);
@@ -123,7 +133,7 @@
     const pool = Number(config.devResources) || 0;
     const overhead = Math.max(0, Number(config.teamOverhead) || 0);
     const wip = Number(config.wipLimit) || 0;
-    // Low SME availability stretches SME-dependent stages. A blank availability has no effect,
+    // A use case that needs a lot of SME time (High) stretches SME-dependent stages. A blank rating has no effect,
     // and a per-use-case override is used exactly as entered.
     const smeF = it => (config.smeFactors && config.smeFactors[it.sme]) || 1;
     const weeksFor = (it, s) => {
