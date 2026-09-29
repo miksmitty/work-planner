@@ -240,9 +240,12 @@
         for (const r of active) {
           if (free <= 1e-9) break;
           if (!r.started || r.finish !== null || r.readyAt > t) continue;
+          // Already under way (so not held at the start): its Build waits until its dependencies are met.
+          if (r.forced && r.engStart === null && !depsMet(r, t)) continue;
           const alloc = Math.min(r.cap, free), prog = alloc * eff(alloc);
           if (r.engStart === null) {
             r.engStart = t;
+            if (r.forced) r.depAt = r.deps.reduce((m, d) => Math.max(m, depEnd(d) || 0), 0);
             // Reuse is realised when Build starts. If this use case builds on another, the saving only
             // applies once that use case's Build has finished (its plumbing then exists).
             if (r.reuseOnEffort !== 1) {
@@ -281,7 +284,11 @@
         const s = stages[i];
         if (i === engIdx) {
           if (!scheduled) continue;
-          if (r.engStart > t) bars.push({ key: 'queue', stageId: null, name: 'Waiting for developers', type: 'queue', start: t, end: r.engStart });
+          if (r.engStart > t) {
+            const depTo = r.forced ? Math.min(r.engStart, Math.max(t, r.depAt)) : t;   // part of the wait that is a dependency
+            if (depTo > t + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: t, end: depTo });
+            if (r.engStart > depTo + 1e-9) bars.push({ key: 'queue', stageId: null, name: 'Waiting for developers', type: 'queue', start: depTo, end: r.engStart });
+          }
           push(s, i, r.engStart, r.engEnd);
           t = r.engEnd;
         } else if (engIdx < 0 || i < engIdx || scheduled) {

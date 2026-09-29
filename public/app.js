@@ -106,9 +106,44 @@ function bind() {
   syncInputs();
 }
 // Inline picker over a Gantt cell: stage or complexity.
+// Popover to edit a use case's dependencies from the Gantt: tick predecessors, choose "until when" for each.
+function pickDeps(rect) {
+  document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
+  const it = state.items.find(x => x.id === rect.dataset.id); if (!it) return;
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
+  const others = Scheduler.orderItems(state).filter(o => o.id !== it.id);
+  const cur = Object.fromEntries((it.dependsOn || []).map(d => [d.id, d.until || '']));
+  const snap = JSON.stringify(state.items);
+  const stageOpts = sel => `<option value="">finishes</option>` + state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>completes ${i + 1}. ${esc(s.name)}</option>`).join('');
+  const pop = document.createElement('div'); pop.className = 'cxpick deppop';
+  pop.style.left = Math.max(0, rr.left - br.left) + 'px'; pop.style.top = (rr.bottom - br.top + 2) + 'px';
+  pop.innerHTML = `<div class="dp-head"><b>Depends on</b> · ${esc(it.name)}<span class="grow"></span><button class="ghost dp-x" title="Discard changes (Esc)">Cancel</button><button class="primary dp-ok">Done</button></div>
+    <div class="hint" style="margin:2px 0 6px">This use case can't start until every ticked use case has reached the point chosen. If it is already under way, it keeps running its current stage and its Build waits.</div>
+    <input type="text" class="dp-filter" placeholder="Filter use cases…">
+    <div class="dp-list">${others.map(o => `<label class="dp-row" data-name="${esc((o.spId || '') + ' ' + o.name).toLowerCase()}"><input type="checkbox" data-id="${esc(o.id)}" ${o.id in cur ? 'checked' : ''}><span class="dp-name">${esc((o.spId ? o.spId + ' · ' : '') + o.name)}</span><select data-until="${esc(o.id)}" ${o.id in cur ? '' : 'disabled'}>${stageOpts(cur[o.id])}</select></label>`).join('') || '<div class="hint">No other use cases yet.</div>'}</div>`;
+  box.appendChild(pop);
+  let closed = false;
+  const close = save => {
+    if (closed) return; closed = true; document.removeEventListener('mousedown', away, true);
+    if (pop.parentNode) pop.parentNode.removeChild(pop);
+    if (save) {
+      const next = [...pop.querySelectorAll('input[type=checkbox]:checked')].map(c => ({ id: c.dataset.id, until: pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).value || null }));
+      if (JSON.stringify(next) !== JSON.stringify(it.dependsOn || [])) { undoStack.push(snap); it.dependsOn = next; renderRows(); update(); gmsg(`Dependencies updated (${next.length})`); }
+    }
+    $('#gantt').focus({ preventScroll: true });
+  };
+  const away = e => { if (!e.composedPath().includes(pop)) close(true); };
+  setTimeout(() => document.addEventListener('mousedown', away, true), 0);
+  pop.addEventListener('change', e => { const c = e.target; if (c.type === 'checkbox') pop.querySelector(`select[data-until="${CSS.escape(c.dataset.id)}"]`).disabled = !c.checked; });
+  pop.querySelector('.dp-filter').addEventListener('input', e => { const q = e.target.value.trim().toLowerCase(); pop.querySelectorAll('.dp-row').forEach(r => { r.style.display = !q || r.dataset.name.includes(q) ? '' : 'none'; }); });
+  pop.querySelector('.dp-ok').onclick = () => close(true); pop.querySelector('.dp-x').onclick = () => close(false);
+  pop.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); close(true); } });
+  pop.querySelector('.dp-filter').focus();
+}
 function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id), kind = rect.dataset.pick; if (!it) return;
+  if (kind === 'dep') return pickDeps(rect);
   const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect();
   if (kind === 'pri') {   // priority is a number, so use an input rather than a list
     const inp = document.createElement('input'); inp.type = 'number'; inp.min = 1; inp.step = 1; inp.className = 'cxpick'; inp.value = it.priority ?? '';
@@ -496,12 +531,14 @@ function update() {
 
 
 /* ---- spreadsheet-style editing in the Gantt table: select, copy / paste, fill handle, delete, undo ---- */
-const COLKEY = { 2: 'stage', 3: 'priority', 4: 'complexity', 5: 'sme', 6: 'reuse' };   // editable columns (indexes in cols())
-const C_FIRST = 2, C_LAST = 6;
+const COLKEY = { 2: 'stage', 3: 'priority', 4: 'complexity', 5: 'sme', 6: 'reuse', 7: 'dependsOn' };   // editable columns (indexes in cols())
+const C_FIRST = 2, C_LAST = 7;
 let gsel = null;         // { anchor:{c,id}, cur:{c,id}, c0, c1, ids:[] }  - rows tracked by id so re-sorting can't move them
 let fillPrev = null;     // { p0, p1 } rows previewed while dragging the fill handle
 const undoStack = [];
 const rowPos = id => plan.rows.findIndex(r => r.id === id);
+// How a use case is shown in the ID column: its SharePoint ID, else its row number.
+const displayId = id => { const o = state.items.find(i => i.id === id), p = plan.rows.findIndex(x => x.id === id); return o ? (o.spId || String(p + 1)) : '?'; };
 const itemOf = id => state.items.find(i => i.id === id);
 const pushUndo = () => { undoStack.push(JSON.stringify(state.items)); if (undoStack.length > 40) undoStack.shift(); };
 function undo() {
@@ -520,10 +557,25 @@ const gridActive = () => gsel && $('#gantt').contains(document.activeElement) &&
 const cellText = (it, key) => key === 'stage' ? (it.stage === TRIAGE ? 'Stakeholder Triage' : (state.config.stages.find(s => s.id === it.stage) || {}).name || '')
   : key === 'priority' ? String(it.priority ?? '')
   : key === 'complexity' ? (state.config.complexities.find(c => c.key === it.complexity) || {}).name || ''
+  : key === 'dependsOn' ? (it.dependsOn || []).map(d => displayId(d.id) + (d.until ? '>' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) : '')).join(', ')
   : SME_LABEL[it[key]] || '';
 // Parse pasted text for a column. Returns { ok, value }.
-function parseCell(key, text) {
+function parseCell(key, text, it) {
   const t = String(text ?? '').trim();
+  if (key === 'dependsOn') {   // "12>Build, 15": use case (SharePoint ID, name or row number), optional ">stage" = until that stage completes
+    const out = [];
+    for (const tok of t.split(/[,;]+/).map(x => x.trim()).filter(Boolean)) {
+      const [ref, st] = tok.split(/\s*>\s*/), low = ref.trim().toLowerCase();
+      let cand = state.items.find(o => o.spId && o.spId.toLowerCase() === low) || state.items.find(o => o.name.toLowerCase() === low);
+      if (!cand && /^\d+$/.test(low)) { const r = plan.rows[+low - 1], o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
+      if (!cand) return { ok: false };
+      let until = null;
+      if (st) { until = matchStage(st); if (!until || until === TRIAGE) return { ok: false }; }
+      if (it && cand.id === it.id) continue;          // a use case can't depend on itself
+      if (!out.some(d => d.id === cand.id)) out.push({ id: cand.id, until });
+    }
+    return { ok: true, value: out };
+  }
   if (key === 'stage') { const v = matchStage(t); return v ? { ok: true, value: v } : { ok: false }; }
   if (key === 'priority') { if (t === '') return { ok: true, value: null }; const v = parsePriority(t); return v == null ? { ok: false } : { ok: true, value: v }; }
   if (key === 'complexity') { const v = matchComplexity(t); return v ? { ok: true, value: v } : { ok: false }; }
@@ -543,7 +595,7 @@ function pasteText(text) {
   let rows = String(text).replace(/\r/g, '').split('\n'); if (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
   const grid = rows.map(r => r.split('\t')); let ok = 0, bad = 0;
   pushUndo();
-  const put = (id, c, val) => { const key = COLKEY[c], r = parseCell(key, val); if (!r.ok) { bad++; return; } itemOf(id)[key] = r.value; ok++; };
+  const put = (id, c, val) => { const key = COLKEY[c], r = parseCell(key, val, itemOf(id)); if (!r.ok) { bad++; return; } itemOf(id)[key] = r.value; ok++; };
   if (grid.length === 1 && grid[0].length === 1 && (ps.length > 1 || gsel.c1 > gsel.c0)) {
     gsel.ids.forEach(id => { for (let c = gsel.c0; c <= gsel.c1; c++) put(id, c, grid[0][0]); });   // one value fills the whole selection
   } else {
@@ -556,7 +608,7 @@ function pasteText(text) {
 }
 function clearSelection() {   // Delete: blank optional columns (priority, SME, reuse); stage and complexity can't be blank
   pushUndo(); let n = 0;
-  gsel.ids.forEach(id => { for (let c = gsel.c0; c <= gsel.c1; c++) { const k = COLKEY[c]; if (k === 'priority' || k === 'sme' || k === 'reuse') { itemOf(id)[k] = null; n++; } } });
+  gsel.ids.forEach(id => { for (let c = gsel.c0; c <= gsel.c1; c++) { const k = COLKEY[c]; if (k === 'priority' || k === 'sme' || k === 'reuse' || k === 'dependsOn') { itemOf(id)[k] = k === 'dependsOn' ? [] : null; n++; } } });
   commit(n ? `Cleared ${n} value${n === 1 ? '' : 's'}` : 'Stage and complexity cannot be blank');
 }
 // Copy the selected block into target rows (fill handle / Ctrl+D). Sources repeat in order.
@@ -566,7 +618,10 @@ function fillRows(sourcePos, targetPos) {
   targetPos.forEach(tp => {
     const k = tp > sourcePos[sourcePos.length - 1] ? (tp - lo) % src.length : (src.length - 1 - ((lo - 1 - tp) % src.length));
     const s = src[k], d = itemOf(plan.rows[tp].id);
-    for (let c = gsel.c0; c <= gsel.c1; c++) { d[COLKEY[c]] = s[COLKEY[c]]; n++; }
+    for (let c = gsel.c0; c <= gsel.c1; c++) {
+      const k = COLKEY[c];
+      d[k] = k === 'dependsOn' ? (s.dependsOn || []).filter(x => x.id !== d.id).map(x => ({ ...x })) : s[k]; n++;
+    }
   });
   const all = [...sourcePos, ...targetPos]; const a = Math.min(...all), b = Math.max(...all);
   setRange({ c: gsel.c0, p: a }, { c: gsel.c1, p: b });
@@ -664,7 +719,7 @@ const COLHELP = {
   cx: 'Complexity of the use case. It sets the Build effort in developer-weeks (see Engineering size on the Setup tab).',
   sme: 'SME required: how much subject-matter-expert time the use case needs (H / M / L). Higher stretches the SME-flagged stages.',
   reuse: 'Reuse: how much of the plumbing already exists from earlier deliveries (H / M / L). Higher reduces Build effort.',
-  dep: 'Depends on: use cases (by ID) that must finish first before this one can start (finish-to-start). Set them under "details" on the Use cases tab. Grey arrows in the chart show each link.',
+  dep: 'Depends on: use cases (by ID) that must finish first before this one can start (finish-to-start). A use case already under way keeps running its current stage; its Build waits. Click a cell to choose them (or edit under "details" on the Use cases tab); copy/paste uses IDs, with ">Stage" for "until that stage completes", e.g. "12>Build, 15". Grey arrows in the chart show each link.',
   dur: 'Predicted elapsed weeks from when work starts to when the use case finishes.',
   start: 'Predicted date work starts (the first stage after any triage period). ~ marks a tentative date for a use case still in Stakeholder Triage.',
   end: 'Predicted finish date at the end of the last stage. ~ marks a tentative date for a use case still in Stakeholder Triage.',
@@ -672,7 +727,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 66, dur: 66, start: 88, end: 88 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 84, dur: 66, start: 88, end: 88 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -727,13 +782,13 @@ function leftRows(ui = true) {
   const rows = [{ id: 0, name: 'Programme', bold: true, dur: plan.totalWeeks, start: plan.startDate, end: plan.endDate }]
     .concat(plan.rows.map((r, i) => {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
-      const idText = id => { const o = byId[id], p = plan.rows.findIndex(x => x.id === id); return o ? (o.spId || String(p + 1)) : '?'; };
+      const idText = displayId;
       const deps = (it.dependsOn || []);
       return { dep: deps.map(d => idText(d.id)).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
   return rows.map((r, i) => {
     const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
-    if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; }
+    if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; vals[7] = (vals[7] || '–') + ' ▾'; }
     return { ...r, vals };
   });
 }
@@ -760,7 +815,7 @@ function leftSVG(L, ui = true) {
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
       const hit = (kind, k) => `<rect data-cell data-ci="${k}" data-p="${i - 1}" data-id="${esc(r.itemId)}" data-pick="${kind}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Click to change · drag to select a range (then Ctrl/Cmd+C, Ctrl/Cmd+V) · shift-click extends</title></rect>`;
-      o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6);
+      o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6) + hit('dep', 7);
     }
   });
   if (selPos.length) {   // outline + fill handle

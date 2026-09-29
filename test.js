@@ -244,6 +244,13 @@ assert.ok(startOf(r, 'x2') >= Math.max(row(r, 'x0').end, row(r, 'x1').end) - 1e-
 c = state(8, ['low', 'low']); c.items[0].stage = 'operate'; c.items[0].stageStart = '2025-12-01';   // finished before the plan starts
 c.items[1].dependsOn = [{ id: 'x0', until: null }];
 assert.strictEqual(startOf(schedule(c), 'x1'), 0);
+// A use case already under way keeps running its current stage; its Build waits for the dependency.
+c = state(8, ['low', 'low']); c.config.wipLimit = 0;
+c.items[1].stage = 'feasibility'; c.items[1].dependsOn = [{ id: 'x0', until: null }];
+r = schedule(c);
+assert.strictEqual(startOf(r, 'x1'), 0);                                           // Feasibility runs straight away
+assert.ok(eng(row(r, 'x1')).start >= row(r, 'x0').end - 1e-9);                     // Build waits for x0 to finish
+assert.ok(row(r, 'x1').bars.some(b => b.key === 'depwait'));
 // Circular dependencies are ignored and flagged (no hang)
 c = state(8, ['low', 'low']); c.items[0].dependsOn = [{ id: 'x1', until: null }]; c.items[1].dependsOn = [{ id: 'x0', until: null }];
 r = schedule(c);
