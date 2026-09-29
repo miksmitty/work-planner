@@ -133,7 +133,7 @@ input.pri { width:54px; }
 }
 html { -webkit-text-size-adjust:100%; }
 body { font:400 var(--fs-body)/1.45 var(--font); -webkit-font-smoothing:antialiased; letter-spacing:.005em; }
-.wrap { padding:16px 20px 32px; gap:var(--gap); max-width:1800px; margin:0 auto; }
+.wrap { padding:10px 14px 16px; gap:10px; }
 h1 { font-size:var(--fs-title); font-weight:700; letter-spacing:-.01em; }
 .top { gap:12px 24px; padding-bottom:2px; }
 #summary { font-size:var(--fs-body); color:var(--muted); } #summary b { color:var(--text); font-weight:600; }
@@ -192,3 +192,7 @@ dialog .preview { font-size:var(--fs-small); }
 .deppop select, .deppop .dp-fb, .deprow label { font-size:var(--fs-small); }
 input[type=checkbox], input[type=radio], input[type=range] { min-height:0; padding:0; accent-color:var(--accent); }
 label.hint { display:inline-flex; align-items:center; gap:6px; }
+
+/* compact settings bar: the explanation lives in a tooltip so the chart gets the space */
+.capbar { padding:8px 14px; gap:6px 28px; }
+.capbar .setting .hint { display:none; }

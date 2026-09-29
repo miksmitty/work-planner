@@ -60,6 +60,7 @@ function bind() {
   $('#ovh').oninput = e => { c().teamOverhead = (Number(e.target.value) || 0) / 100; update(); };
   bindDate($('#start'), () => c().startDate, iso => { if (iso) { c().startDate = iso; update(); } });
   $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
+  document.querySelectorAll('.capbar .setting').forEach(el => { const h = el.querySelector('.hint'); if (h) el.title = h.textContent.trim(); });
   const g = $('#gantt');
   g.addEventListener('mousedown', e => {
     const hd = e.target.closest('[data-resize]'); if (!hd) return;
@@ -77,6 +78,7 @@ function bind() {
   });
   bindGrid(g);
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
+  if (lsGet('fitReset') !== '1') { lsSet('fit', '1'); lsSet('fitReset', '1'); }   // earlier zoom shortcuts could leave Fit to width switched off
   $('#fit').checked = lsGet('fit') !== '0';
   $('#fit').onchange = () => { lsSet('fit', $('#fit').checked ? '1' : '0'); renderGantt(); };
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
@@ -724,7 +726,7 @@ document.addEventListener('mousedown', e => {   // clicking away drops the selec
 /* ---- Gantt: one SVG design used for both screen and PNG export ---- */
 const PAL = ['#8b6fd6','#e39a2d','#2f6fed','#1aa39a','#3aa356','#8a94a3','#d6577f','#a0803a'];
 const pal = i => PAL[i % PAL.length];
-const RH = 28, HH = 48, DAYMS = 86400000;
+const RH = 24, HH = 44, DAYMS = 86400000;
 // Mouse-over explanations for the table columns (Gantt header and Use cases table).
 const COLHELP = {
   id: 'SharePoint ID of the use case (or its row number if it has none). Click the ID or name to open the SharePoint item.',
@@ -742,7 +744,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 60, name: 230, stage: 176, pri: 44, cx: 96, sme: 64, reuse: 60, dep: 92, dur: 74, start: 96, end: 96 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 84, dur: 66, start: 88, end: 88 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -789,10 +791,12 @@ function layout(exportW) {
   const endW = Math.max(plan.totalWeeks, fc ? fc.p80.weeks : 0) + 2;
   const last = Scheduler.addWeeks(start, endW);
   const first = showToday() && Date.now() < start ? new Date() : start;
-  const t0 = new Date(Date.UTC(first.getUTCFullYear(), Math.floor(first.getUTCMonth() / 3) * 3, 1));
-  const t1 = new Date(Date.UTC(last.getUTCFullYear(), Math.floor(last.getUTCMonth() / 3) * 3 + 3, 1));
+  // whole months, not whole quarters, so no empty quarter is left before the start or after the end
+  const t0 = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+  const t1 = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 1, 1));
   const avail = (exportW || $('#gantt').clientWidth) - lw() - 4;
-  const ppd = (exportW || $('#fit').checked) && avail > 200 ? avail / ((t1 - t0) / DAYMS) : Number($('#zoom').value) / 2;
+  const fitPpd = avail > 200 ? avail / ((t1 - t0) / DAYMS) : 0;
+  const ppd = (exportW || $('#fit').checked) && fitPpd ? fitPpd : Math.max(Number($('#zoom').value) / 2, fitPpd);   // never leave empty space to the right
   const X = ms => (ms - t0) / DAYMS * ppd;
   return { ppd, start, t0, t1, X, XW: w => X(start.getTime() + w * 7 * DAYMS), width: Math.ceil(X(t1)), height: HH + (plan.rows.length + 1) * RH };
 }
@@ -858,9 +862,9 @@ function rightSVG(L) {
     const x1 = L.X(d), x2 = L.X(nx), isQ = m % 3 === 0;
     hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="11" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
     grid += `<line x1="${x1}" x2="${x1}" y1="${isQ ? 0 : HH / 2}" y2="${H}" stroke="${isQ ? '#8b95a1' : '#e2e5ea'}"/>`;
-    if (isQ) {
-      const q2 = L.X(new Date(Date.UTC(y, m + 3, 1)));
-      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="12" font-weight="600" text-anchor="middle" fill="#1c2430">Q${m / 3 + 1} ${y}</text>`;
+    if (isQ || +d === +L.t0) {   // label each quarter, including a partial first one
+      const qm = m - m % 3, q2 = Math.min(L.X(new Date(Date.UTC(y, qm + 3, 1))), L.X(L.t1));
+      hdr += `<text x="${(x1 + q2) / 2}" y="${HH / 2 - 6}" font-size="12" font-weight="600" text-anchor="middle" fill="#1c2430">Q${qm / 3 + 1} ${y}</text>`;
     }
     d = nx;
   }
