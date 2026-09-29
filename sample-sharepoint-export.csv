@@ -1,0 +1,8 @@
+ID,Title,Complexity,Owner,Item URL
+101,Invoice matching assistant,High,Finance,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=101
+102,"Contract clause extraction, legal",Very High,Legal,https://contoso.sharepoint.com/sites/ai/Lists/UseCases/DispForm.aspx?ID=102
+103,"Support ticket triage
+(multi-line title)",Medium,Support,
+104,HR policy Q&A bot,L,HR,javascript:alert(1)
+105,Demand forecasting,Enormous,Supply,
+,,,,

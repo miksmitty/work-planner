@@ -1,0 +1,5 @@
+# Your saved plan (use case names, settings) - stays local
+data.json
+data.json.tmp
+node_modules/
+.DS_Store
