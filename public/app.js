@@ -231,7 +231,12 @@ function renderStages() {
     if (weeks) weeks.oninput = () => { s.weeks = Number(weeks.value); update(); };
     el.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
       const a = b.dataset.a;
-      if (a === 'l' || a === 'r') { const k = i + (a === 'l' ? -1 : 1); if (k < 0 || k >= st.length) return; [st[i], st[k]] = [st[k], st[i]]; }
+      if (a === 'l' || a === 'r') { const k = i + (a === 'l' ? -1 : 1); if (k < 0 || k >= st.length) return;
+        // Planning tool: a reorder reshapes the plan for everyone. Each use case keeps its position in the sequence
+        // (so it still has the same number of stages behind it) and simply runs the stages in their new order.
+        const pos = state.items.map(it => st.findIndex(x => x.id === it.stage));
+        [st[i], st[k]] = [st[k], st[i]];
+        state.items.forEach((it, j) => { if (pos[j] >= 0) it.stage = st[pos[j]].id; }); }
       else if (a === 'del') {
         st.splice(i, 1);
         const fallback = (st[Math.max(0, i - 1)] || {}).id;   // use cases in the removed stage move back one stage
@@ -386,6 +391,7 @@ const GUESS = {
   priority: /priorit|rank/i,
   sme: /sme|expert/i,
   reuse: /reus/i,
+  dep: /depend|predecess|prereq|blocked ?by/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -428,7 +434,7 @@ function openImport() {
 }
 function planImport(rows, map, prefix, mode) {
   const head = rows[0], col = k => map[k] === '' ? -1 : head.indexOf(map[k]);
-  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse') };
+  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse'), dep: col('dep') };
   const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set(), unmatchedStage: new Set() };
   const seen = new Set();
   rows.slice(1).forEach(r => {
@@ -444,7 +450,7 @@ function planImport(rows, map, prefix, mode) {
     const sme = ci.sme >= 0 ? parseSme(g(ci.sme)) : null;
     const reuse = ci.reuse >= 0 ? parseSme(g(ci.reuse)) : null;   // H / M / L, same wording
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
-    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing });
+    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing, dep: ci.dep >= 0 ? g(ci.dep) : null });
     existing ? out.updates++ : out.adds++;
   });
   return out;
@@ -466,6 +472,7 @@ function showImport(rows, fileName) {
       <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
       <label title="How much of the needed plumbing already exists: High / Medium / Low (or H / M / L)">Reuse</label><select data-m="reuse">${opts(guess('reuse'))}</select>
       <label title="How much SME time the use case needs: High / Medium / Low (or H / M / L)">SME required</label><select data-m="sme">${opts(guess('sme'))}</select>
+      <label title="Predecessors: SharePoint IDs (or names) separated by ; or ,. Optional >Stage = until that stage completes, then @build (start at Build) or @hold (only Build waits). Matches what Download CSV writes.">Depends on</label><select data-m="dep">${opts(guess('dep'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
       <label>If ID already exists</label>
@@ -495,14 +502,21 @@ function showImport(rows, fileName) {
     const p = planImport(rows, map, prefix, mode === 'replace' ? 'add' : mode);
     if (mode === 'replace') state.items = [];
     const dflt = state.config.complexities[1]?.key || state.config.complexities[0].key;
+    const applied = [];
     p.items.forEach(i => {
-      if (i.existing) { i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; return; }
+      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; return; }
       state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, reuse: i.reuse || null, buildsOn: null, stageStart: null,
         teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+      applied.push([i, state.items[state.items.length - 1]]);
     });
+    // Dependencies last, once every imported use case exists so rows can refer to each other
+    let depMiss = 0;
+    applied.forEach(([i, it]) => { if (i.dep == null) return; const deps = [];
+      for (const tok of i.dep.split(/[,;]+/).map(x => x.trim()).filter(Boolean)) { const r = parseCell('dependsOn', tok, it); if (r.ok && r.value[0]) { if (!deps.some(d => d.id === r.value[0].id)) deps.push(r.value[0]); } else depMiss++; }
+      it.dependsOn = deps; });
     if (prefix) state.config.spLinkBase = prefix;
     $('#spbase').value = state.config.spLinkBase || '';
-    $('#importMsg').textContent = `Imported ${p.adds} new, ${p.updates} updated`;
+    $('#importMsg').textContent = `Imported ${p.adds} new, ${p.updates} updated` + (depMiss ? ` · ${depMiss} dependency reference${depMiss > 1 ? 's' : ''} not matched` : '');
     dlg.close(); dlg.remove(); renderRows(); update();
   };
   dlg.showModal();
@@ -933,7 +947,7 @@ function downloadCSV() {
   const q = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const idOf = id => { const i = state.items.find(x => x.id === id); return i ? (i.spId || i.name) : id; };
   const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On']]
-    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id)).join('; ')]));
+    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; ')]));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }));
   a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
