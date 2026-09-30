@@ -40,7 +40,7 @@
         <span class="hint" id="gmsg" style="color:#2f6fed;font-weight:600"></span>
         <span class="grow"></span>
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
-        <label class="hint" title="Scale the chart to fill the window. Untick (or use Zoom) to scroll sideways at a fixed scale"><input type="checkbox" id="fit" checked> Fit to width</label>
+        <button id="fit" type="button" aria-pressed="true" title="Scale the chart to fill the window width. Moving the Zoom slider switches back to a fixed scale">Fit to width</button>
         <label class="hint" title="Pixels per day. Moving it turns off Fit to width">Zoom <input id="zoom" type="range" min="1" max="16" step="0.5" value="2"></label>
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
         <button id="png" class="primary">Download PNG</button>

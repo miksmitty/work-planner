@@ -79,8 +79,10 @@ function bind() {
   bindGrid(g);
   $('#zoom').oninput = () => { $('#fit').checked = false; lsSet('fit', '0'); renderGantt(); };
   if (lsGet('fitReset') !== '1') { lsSet('fit', '1'); lsSet('fitReset', '1'); }   // earlier zoom shortcuts could leave Fit to width switched off
-  $('#fit').checked = lsGet('fit') !== '0';
-  $('#fit').onchange = () => { lsSet('fit', $('#fit').checked ? '1' : '0'); renderGantt(); };
+  const fitBtn = $('#fit');   // a toggle button; `checked` keeps the rest of the code unchanged
+  Object.defineProperty(fitBtn, 'checked', { get: () => fitBtn.classList.contains('on'), set: v => { fitBtn.classList.toggle('on', !!v); fitBtn.setAttribute('aria-pressed', String(!!v)); } });
+  fitBtn.checked = lsGet('fit') !== '0';
+  fitBtn.onclick = () => { fitBtn.checked = true; lsSet('fit', '1'); renderGantt(); };
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
   showTab(lsGet('tab') || 'timeline');
   window.addEventListener('resize', () => { if (activeTab === 'timeline') renderGantt(); });
