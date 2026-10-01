@@ -108,6 +108,15 @@
       if (x.min == null) x.min = Math.round(x.effort * 0.7);
       if (x.max == null) x.max = Math.round(x.effort * 1.75);
     });
+    // Heal stage lists damaged by earlier edits: unique ids, a name on every stage, at most one engineering stage.
+    { const seen = new Set(); let eng = false;
+      c.stages.forEach((st, i) => {
+        if (!st.id || seen.has(st.id)) st.id = 's' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 5);
+        seen.add(st.id);
+        if (!String(st.name || '').trim()) st.name = 'Stage ' + (i + 1);
+        if (st.kind === 'eng') { if (eng) { delete st.kind; if (st.weeks == null) st.weeks = 2; } eng = true; }
+        else if (st.weeks == null || isNaN(Number(st.weeks))) st.weeks = 2;
+      }); }
     const first = c.stages[0] && c.stages[0].id;
     state.items.forEach(it => {
       if (!it.overrides) it.overrides = {};
@@ -119,7 +128,8 @@
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
       if (!it.buildsOn) it.buildsOn = null;
       // dependsOn: [{ id, until }] - finish-to-start; `until` = a stage id the predecessor must complete (null = its finish); `fromBuild` = start at Build afterwards
-      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until || null, fromBuild: !!d.fromBuild, holdBuild: !!d.holdBuild }));
+      Object.keys(it.overrides).forEach(k => { if (!c.stages.some(x => x.id === k)) delete it.overrides[k]; });
+      it.dependsOn = (Array.isArray(it.dependsOn) ? it.dependsOn : []).filter(d => d && d.id).map(d => ({ id: d.id, until: d.until && c.stages.some(x => x.id === d.until) ? d.until : null, fromBuild: !!d.fromBuild, holdBuild: !!d.holdBuild }));
     });
     return state;
   }

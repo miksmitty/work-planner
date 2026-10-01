@@ -221,31 +221,39 @@ function renderStages() {
   st.forEach((s, i) => {
     const eng = s.kind === 'eng';
     const el = document.createElement('div'); el.className = 'chip' + (eng ? ' eng' : ''); el.style.setProperty('--c', color(i));
-    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name">${s.sme ? '<span class="smetag" title="This stage is stretched for use cases that need Medium or High SME involvement">SME</span>' : ''}${s.reuse ? '<span class="smetag reusetag" title="This stage is shortened by reuse of existing components">REUSE</span>' : ''}
+    el.innerHTML = `<span class="stagenum">${i + 1}</span><input type="text" value="${esc(s.name)}" aria-label="Stage name"><span class="tags"></span>
       ${eng ? `<span class="by" title="Set by complexity and developers">by complexity</span>`
             : `<input type="number" min="0" step="1" value="${s.weeks ?? 0}" aria-label="Weeks"><span class="muted">wk</span>`}
       <span class="tools">
-        <button data-a="sme" title="${s.sme ? 'Stop' : 'Start'} stretching this stage by how much SME time the use case needs">SME</button><button data-a="reuse" title="${s.reuse ? 'Stop' : 'Start'} shortening this stage by reuse of existing components">Reuse</button><button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
+        <button data-a="sme">SME</button><button data-a="reuse">Reuse</button><button data-a="l" title="Move earlier">◀</button><button data-a="r" title="Move later">▶</button>
         ${eng ? '' : `<button data-a="eng" title="Make this the engineering stage (length driven by complexity &amp; developers)">⚙</button><button data-a="del" title="Remove stage">✕</button>`}
       </span>`;
+    // SME / Reuse toggles update the chip in place: rebuilding it would drop the hover tray from under the pointer.
+    const paint = () => {
+      el.querySelector('.tags').innerHTML = (s.sme ? '<span class="smetag" title="This stage is stretched for use cases that need Medium or High SME involvement">SME</span>' : '') + (s.reuse ? '<span class="smetag reusetag" title="This stage is shortened by reuse of existing components">REUSE</span>' : '');
+      el.querySelector('[data-a=sme]').title = (s.sme ? 'Stop' : 'Start') + ' stretching this stage by how much SME time the use case needs';
+      el.querySelector('[data-a=reuse]').title = (s.reuse ? 'Stop' : 'Start') + ' shortening this stage by reuse of existing components';
+      el.querySelector('[data-a=sme]').classList.toggle('on', !!s.sme); el.querySelector('[data-a=reuse]').classList.toggle('on', !!s.reuse);
+    };
+    paint();
     const [name, weeks] = el.querySelectorAll('input');   // number span is not an input
     name.oninput = () => { s.name = name.value; update(); };
-    if (weeks) weeks.oninput = () => { s.weeks = Number(weeks.value); update(); };
-    el.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+    name.onchange = () => { if (!name.value.trim()) name.value = 'Stage ' + (i + 1); s.name = name.value.trim(); renderRows(); update(); };   // refresh stage pickers with the new name
+    if (weeks) { weeks.oninput = () => { const w = Number(weeks.value); if (weeks.value !== '' && w >= 0) { s.weeks = w; update(); } };
+      weeks.onchange = () => { if (weeks.value === '' || !(Number(weeks.value) >= 0)) weeks.value = s.weeks ?? 0; }; }
+    el.querySelectorAll('[data-a]').forEach(b => b.onclick = ev => {
       const a = b.dataset.a;
+      if (ev.detail) b.blur();   // mouse click: don't leave the tray pinned open by focus
       if (a === 'l' || a === 'r') { const k = i + (a === 'l' ? -1 : 1); if (k < 0 || k >= st.length) return;
-        // Planning tool: a reorder reshapes the plan for everyone. Each use case keeps its position in the sequence
-        // (so it still has the same number of stages behind it) and simply runs the stages in their new order.
-        const pos = state.items.map(it => st.findIndex(x => x.id === it.stage));
-        [st[i], st[k]] = [st[k], st[i]];
-        state.items.forEach((it, j) => { if (pos[j] >= 0) it.stage = st[pos[j]].id; }); }
+        [st[i], st[k]] = [st[k], st[i]]; }   // use cases stay in their stage; only the order changes
       else if (a === 'del') {
+        if (st.length < 2) return;
         st.splice(i, 1);
+        state.items.forEach(it => (it.dependsOn || []).forEach(d => { if (d.until === s.id) d.until = null; }));
         const fallback = (st[Math.max(0, i - 1)] || {}).id;   // use cases in the removed stage move back one stage
         state.items.forEach(it => { if (it.stage === s.id) it.stage = fallback; if (it.overrides) delete it.overrides[s.id]; });
       }
-      else if (a === 'sme') { s.sme = !s.sme; }
-      else if (a === 'reuse') { s.reuse = !s.reuse; }
+      else if (a === 'sme' || a === 'reuse') { s[a] = !s[a]; paint(); update(); return; }
       else if (a === 'eng') { const old = st.find(x => x.kind === 'eng'); if (old) { delete old.kind; old.weeks = 2; } delete s.weeks; s.kind = 'eng'; }
       renderStages(); renderRows(); update();
     });
