@@ -93,7 +93,7 @@ function bind() {
   $('#add').onclick = () => { state.items.push(newItem('New use case')); renderRows(); update(); };
   $('#import').onclick = openImport;
   $('#export').onclick = downloadCSV;
-  // Browser zoom is shared by every tab of the page, so take over Ctrl/Cmd +/-/0 and Ctrl/Cmd+wheel (pinch) and keep a separate zoom per tab
+  // Take over Ctrl/Cmd +/-/0 and Ctrl/Cmd+wheel (pinch) so zoom is one consistent level across all tabs
   document.addEventListener('wheel', e => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); stepZoom(e.deltaY < 0 ? 0.05 : -0.05); } }, { passive: false });
   document.addEventListener('keydown', e => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -792,11 +792,12 @@ const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
-const tabZoom = () => { try { return JSON.parse(lsGet('tabZoom')) || {}; } catch { return {}; } };
-function applyZoom() { const z = tabZoom()[activeTab] || 1; document.body.style.zoom = z === 1 ? '' : z; }
+// One zoom level for every tab, so text and controls stay the same size when switching screens
+const pageZoom = () => { const z = Number(lsGet('pageZoom')); return z >= 0.5 && z <= 3 ? z : 1; };
+function applyZoom() { const z = pageZoom(); document.body.style.zoom = z === 1 ? '' : z; }
 function stepZoom(d, reset) {
-  const tz = tabZoom(), z = reset ? 1 : Math.min(3, Math.max(0.5, Math.round(((tz[activeTab] || 1) + d) * 100) / 100));
-  tz[activeTab] = z; lsSet('tabZoom', JSON.stringify(tz)); applyZoom(); if (activeTab === 'timeline' && plan) renderGantt();
+  const z = reset ? 1 : Math.min(3, Math.max(0.5, Math.round((pageZoom() + d) * 100) / 100));
+  lsSet('pageZoom', String(z)); applyZoom(); if (activeTab === 'timeline' && plan) renderGantt();
 }
 function showTab(t) {
   if (!document.getElementById('tab-' + t)) t = 'timeline';
@@ -867,7 +868,7 @@ function leftSVG(L, ui = true) {
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = (r.triage && k === 2) || r.oos;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="12" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="13" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       if (r.comments && k === 1) { o += `<g><title>${esc(r.comments)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`; }
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
@@ -892,7 +893,7 @@ function rightSVG(L) {
   for (let d = new Date(L.t0); d < L.t1;) {
     const y = d.getUTCFullYear(), m = d.getUTCMonth(), nx = new Date(Date.UTC(y, m + 1, 1));
     const x1 = L.X(d), x2 = L.X(nx), isQ = m % 3 === 0;
-    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="11" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
+    hdr += `<text x="${(x1 + x2) / 2}" y="${HH - 7}" font-size="12" text-anchor="middle" fill="#33404f">${d.toLocaleDateString('en', { month: (x2 - x1) > 30 ? 'short' : 'narrow', timeZone: 'UTC' })}</text>`;
     grid += `<line x1="${x1}" x2="${x1}" y1="${isQ ? 0 : HH / 2}" y2="${H}" stroke="${isQ ? '#8b95a1' : '#e2e5ea'}"/>`;
     if (isQ || +d === +L.t0) {   // label each quarter, including a partial first one
       const qm = m - m % 3, q2 = Math.min(L.X(new Date(Date.UTC(y, qm + 3, 1))), L.X(L.t1));
@@ -916,16 +917,16 @@ function rightSVG(L) {
       const tip = `<title>${esc(r.name)} — ${esc(b.name)}${blName ? ' on ' + esc(blName) + (bl.until ? ' to finish ' + esc(blStage) : ' to finish') + ' (' + esc(shortDate(L0(bl.at))) + ')' : ''}: ${esc(shortDate(b.startDate))} → ${esc(shortDate(b.endDate))} (${wk(b.end - b.start)} wks)</title>`;
       if (b.key === 'depwait') {
         o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#fff4e0" stroke="#e08a00" stroke-width="1.2" stroke-dasharray="4 2"/>`;
-        if (w > 60) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" font-weight="600" fill="#9a5b00">${esc(clip('⏳ Waiting on ' + (blName || 'a dependency'), w - 8))}</text>`;
+        if (w > 60) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="12" font-weight="600" fill="#9a5b00">${esc(clip('⏳ Waiting on ' + (blName || 'a dependency'), w - 8))}</text>`;
         o += '</g>';
       } else if (b.type === 'queue') o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
       else if (b.type === 'triage') {
         o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
-        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
+        if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="12" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
         o += '</g>';
       } else {
         o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
-        if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
+        if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="12" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
         o += '</g>';
       }
     });
@@ -985,7 +986,7 @@ function downloadPNG() {
   const title = `Work plan · ${state.config.devResources} developers · planned finish ${shortDate(plan.endDate)}` +
     (fc ? ` · 80% confident by ${shortDate(fc.p80.date)}` : '');
   let lg = '', x = 10;
-  legendItems().forEach(i => { lg += `<rect x="${x}" y="${TH + L.height + 10}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${TH + L.height + 19}" font-size="11" fill="#33404f">${esc(i.t)}</text>`; x += 15 + i.t.length * 6 + 18; });
+  legendItems().forEach(i => { lg += `<rect x="${x}" y="${TH + L.height + 10}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${TH + L.height + 19}" font-size="12" fill="#33404f">${esc(i.t)}</text>`; x += 15 + i.t.length * 6 + 18; });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Helvetica, Arial, sans-serif">${SVG_DEFS}
     <rect width="${W}" height="${H}" fill="#fff"/><text x="10" y="22" font-size="15" font-weight="700" fill="#1c2430">${esc(title)}</text>
     <g transform="translate(0,${TH})">${leftSVG(L, false)}</g><g transform="translate(${lw()},${TH})">${rightSVG(L)}</g>${lg}</svg>`;
