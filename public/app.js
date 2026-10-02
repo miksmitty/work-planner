@@ -751,7 +751,7 @@ document.addEventListener('paste', e => {
 document.addEventListener('mousedown', e => {   // clicking away drops the selection
   // Use the event's original path: the grid re-renders during its own mousedown, so e.target may already be detached.
   const path = e.composedPath ? e.composedPath() : [];
-  if (gsel && !path.includes($('#gantt')) && !path.some(n => n.tagName === 'DIALOG')) { gsel = null; if (activeTab === 'timeline') renderGantt(); }
+  if (gsel && !path.includes($('#gantt')) && !path.some(n => n.tagName === 'DIALOG' || (n.classList && n.classList.contains('cxpick')))) { gsel = null; if (activeTab === 'timeline') renderGantt(); }
 });
 
 /* ---- Gantt: one SVG design used for both screen and PNG export ---- */

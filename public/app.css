@@ -208,3 +208,8 @@ tr.oos td { opacity: .55; }
 tr.oos td:last-child, tr.oos td select[data-f=stage], tr.oos td input[data-f=comments] { opacity: 1; }
 input.comment { width: 180px; }
 .dgrid textarea { font: inherit; }
+
+/* use cases table: fit the window instead of scrolling the page sideways */
+td[data-c="eng"] { white-space:normal; min-width:200px; line-height:1.3; }
+td input[type=text] { min-width:110px; }
+input.comment { width:100%; min-width:120px; }
