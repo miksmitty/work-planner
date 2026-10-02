@@ -203,3 +203,8 @@ label.hint { display:inline-flex; align-items:center; gap:6px; }
 .chip .tools button { min-height:24px; padding:0 8px; }
 #fit.on { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
 .chip .tools button.on { color: var(--text); font-weight: 700; }
+
+tr.oos td { opacity: .55; }
+tr.oos td:last-child, tr.oos td select[data-f=stage], tr.oos td input[data-f=comments] { opacity: 1; }
+input.comment { width: 180px; }
+.dgrid textarea { font: inherit; }

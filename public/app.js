@@ -200,15 +200,16 @@ function syncInputs() {
   const c = state.config;
   $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#start').value = fmt(c.startDate); $('#spbase').value = c.spLinkBase || '';
 }
-const TRIAGE = Scheduler.TRIAGE;
+const TRIAGE = Scheduler.TRIAGE, OOS = Scheduler.OOS;
 // "0. Stakeholder Triage" = clock not started; then the configured stages in order.
 const SME_LABEL = { H: 'High', M: 'Medium', L: 'Low' };
 const smeOptions = sel => `<option value="" ${!sel ? 'selected' : ''}>–</option>` + ['H', 'M', 'L'].map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${SME_LABEL[k]}</option>`).join('');
 const reuseOptions = sel => `<option value="" ${!sel ? 'selected' : ''}>–</option>` + ['H', 'M', 'L'].map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${SME_LABEL[k]}</option>`).join('');
 const stageOptions = sel => `<option value="${TRIAGE}" ${sel === TRIAGE ? 'selected' : ''}>0. Stakeholder Triage</option>` +
-  state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('');
+  state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('') +
+  `<option value="${OOS}" ${sel === OOS ? 'selected' : ''}>Out of scope</option>`;
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
-  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], teamCap: null, effortOverride: null, earliestStart: null, comments: '', overrides: {} });
 
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
@@ -298,7 +299,7 @@ function renderSizes() {
 function renderRows() {
   const tb = $('#rows'); tb.innerHTML = '';
   Scheduler.orderItems(state).forEach((it, i) => {
-    const tr = document.createElement('tr'); tr.dataset.id = it.id;
+    const tr = document.createElement('tr'); tr.dataset.id = it.id; tr.classList.toggle('oos', it.stage === OOS);
     const opts = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
     const link = itemUrl(it);
     tr.innerHTML = `<td class="num">${i + 1}</td>
@@ -310,13 +311,14 @@ function renderRows() {
       <td><select data-f="sme" title="SME required: how much subject-matter-expert time this use case needs">${smeOptions(it.sme)}</select></td>
       <td><select data-f="reuse" title="Reuse: how much of the plumbing already exists">${reuseOptions(it.reuse)}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
+      <td><input type="text" data-f="comments" class="comment" placeholder="Comments" value="${esc(it.comments || '')}"></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
         <button class="ghost" data-a="del" title="Delete">✕</button>
       </td>`;
     tr.querySelectorAll('[data-f]').forEach(el => {
       const f = el.dataset.f;
-      if (f === 'name') el.oninput = () => { it.name = el.value; update(); };
+      if (f === 'name' || f === 'comments') el.oninput = () => { it[f] = el.value; update(); };
       else el.onchange = () => {   // stage / priority change the sort order, so redraw the (re-sorted) list
         it[f] = f === 'priority' ? num(el.value) : (f === 'sme' || f === 'reuse' ? (el.value || null) : el.value);
         renderRows(); update();
@@ -352,7 +354,8 @@ function renderDeps(box, it) {
 function detailsRow(it) {
   const tr = document.createElement('tr'); tr.className = 'details';
   const fixed = state.config.stages.filter(s => s.kind !== 'eng');
-  tr.innerHTML = `<td></td><td colspan="11"><div class="dgrid">
+  tr.innerHTML = `<td></td><td colspan="12"><div class="dgrid">
+    <label title="Free-text notes about this use case (shown as a tooltip on the timeline)" style="flex-basis:100%">Comments <textarea data-t="comments" rows="2" style="width:100%">${esc(it.comments ?? '')}</textarea></label>
     <label title="ID of the item in the SharePoint list">SharePoint ID <input type="text" data-t="spId" value="${esc(it.spId ?? '')}"></label>
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
     <label title="Another use case in this plan whose delivered components this one extends. The reuse saving only applies once that use case's Build has finished (or if it is already past Build). Blank = the reuse rating applies straight away.">Builds on <select data-b="buildsOn"><option value="">— none —</option>${Scheduler.orderItems(state).filter(o => o.id !== it.id).map(o => `<option value="${esc(o.id)}" ${o.id === it.buildsOn ? 'selected' : ''}>${esc((o.spId ? o.spId + ' · ' : '') + o.name)}</option>`).join('')}</select></label>
@@ -366,7 +369,7 @@ function detailsRow(it) {
   renderDeps(tr.querySelector('.depbox'), it);
   tr.querySelectorAll('[data-b]').forEach(el => el.onchange = () => { it.buildsOn = el.value || null; update(); });
   tr.querySelectorAll('[data-d]').forEach(el => bindDate(el, () => it[el.dataset.d], iso => { it[el.dataset.d] = iso || null; update(); }));
-  tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.value.trim() || null; update(); });
+  tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.dataset.t === 'comments' ? el.value : (el.value.trim() || null); if (el.dataset.t === 'comments') { const c = document.querySelector(`tr[data-id="${it.id}"] input[data-f=comments]`); if (c) c.value = el.value; } update(); });
   tr.querySelectorAll('[data-k]').forEach(el => el.oninput = () => { it[el.dataset.k] = num(el.value); update(); });
   tr.querySelectorAll('[data-s]').forEach(el => el.oninput = () => {
     const v = num(el.value); if (v == null) delete it.overrides[el.dataset.s]; else it.overrides[el.dataset.s] = v; update();
@@ -402,6 +405,7 @@ const GUESS = {
   sme: /sme|expert/i,
   reuse: /reus/i,
   dep: /depend|predecess|prereq|blocked ?by/i,
+  comments: /comment|note|remark/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -415,6 +419,7 @@ function matchComplexity(val) {
 function matchStage(val) {
   const v = String(val || '').trim().toLowerCase(); if (!v) return null;
   if (v === '0' || /triage/.test(v)) return TRIAGE;
+  if (/out.?of.?scope|^oos$|descoped?/.test(v)) return OOS;
   const st = state.config.stages;
   if (/^\d+$/.test(v)) return (st[+v - 1] || {}).id || null;
   const num = v.match(/^(\d+)[.)\s-]+/); if (num && st[+num[1] - 1]) return st[+num[1] - 1].id;
@@ -444,7 +449,7 @@ function openImport() {
 }
 function planImport(rows, map, prefix, mode) {
   const head = rows[0], col = k => map[k] === '' ? -1 : head.indexOf(map[k]);
-  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse'), dep: col('dep') };
+  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse'), dep: col('dep'), comments: col('comments') };
   const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set(), unmatchedStage: new Set() };
   const seen = new Set();
   rows.slice(1).forEach(r => {
@@ -460,7 +465,7 @@ function planImport(rows, map, prefix, mode) {
     const sme = ci.sme >= 0 ? parseSme(g(ci.sme)) : null;
     const reuse = ci.reuse >= 0 ? parseSme(g(ci.reuse)) : null;   // H / M / L, same wording
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
-    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing, dep: ci.dep >= 0 ? g(ci.dep) : null });
+    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing, dep: ci.dep >= 0 ? g(ci.dep) : null, comments: ci.comments >= 0 ? String(r[ci.comments] ?? '').trim() : '' });
     existing ? out.updates++ : out.adds++;
   });
   return out;
@@ -482,6 +487,7 @@ function showImport(rows, fileName) {
       <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
       <label title="How much of the needed plumbing already exists: High / Medium / Low (or H / M / L)">Reuse</label><select data-m="reuse">${opts(guess('reuse'))}</select>
       <label title="How much SME time the use case needs: High / Medium / Low (or H / M / L)">SME required</label><select data-m="sme">${opts(guess('sme'))}</select>
+      <label title="Free-text notes for each use case">Comments</label><select data-m="comments">${opts(guess('comments'))}</select>
       <label title="Predecessors: SharePoint IDs (or names) separated by ; or ,. Optional >Stage = until that stage completes, then @build (start at Build) or @hold (only Build waits). Matches what Download CSV writes.">Depends on</label><select data-m="dep">${opts(guess('dep'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
       <input type="text" id="imp-prefix" placeholder="https://tenant.sharepoint.com/sites/team/Lists/UseCases/DispForm.aspx?ID=" value="${esc(state.config.spLinkBase || '')}">
@@ -495,7 +501,7 @@ function showImport(rows, fileName) {
   const preview = () => {
     const { map, prefix, mode } = read();
     const p = planImport(rows, map, prefix, mode === 'update' ? 'update' : 'add');
-    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.stage === TRIAGE ? 'Triage' : (state.config.stages.find(x => x.id === i.stage) || {}).name || 'first stage')} · P${i.priority ?? '–'} · SME ${i.sme || '–'} · reuse ${i.reuse || '–'} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
+    const sample = p.items.slice(0, 4).map(i => `<div>${esc(i.spId || '–')} · ${esc(i.name)} · ${esc(i.cx || 'default complexity')} · ${esc(i.stage === TRIAGE ? 'Triage' : i.stage === OOS ? 'Out of scope' : (state.config.stages.find(x => x.id === i.stage) || {}).name || 'first stage')} · P${i.priority ?? '–'} · SME ${i.sme || '–'} · reuse ${i.reuse || '–'} · ${esc(i.url || resolveBase(prefix, i.spId) || 'no link')}</div>`).join('');
     dlg.querySelector('#imp-prev').innerHTML = `<b>${mode === 'replace' ? p.items.length + ' will replace all existing' : p.adds + ' new, ' + p.updates + ' updated'}</b>${p.skipped ? ` · ${p.skipped} blank rows skipped` : ''}` +
       (!map.name ? `<div class="warn">Choose a Name column.</div>` : '') +
       (p.unmatchedStage.size ? `<div class="warn">Unrecognised stage (will use ${esc(state.config.stages[0]?.name || 'first stage')}): ${[...p.unmatchedStage].slice(0, 8).map(esc).join(', ')}</div>` : '') +
@@ -514,9 +520,9 @@ function showImport(rows, fileName) {
     const dflt = state.config.complexities[1]?.key || state.config.complexities[0].key;
     const applied = [];
     p.items.forEach(i => {
-      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; return; }
+      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; if (i.comments) i.existing.comments = i.comments; return; }
       state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, reuse: i.reuse || null, buildsOn: null, stageStart: null,
-        teamCap: null, effortOverride: null, earliestStart: null, overrides: {} });
+        teamCap: null, effortOverride: null, earliestStart: null, comments: i.comments || '', overrides: {} });
       applied.push([i, state.items[state.items.length - 1]]);
     });
     // Dependencies last, once every imported use case exists so rows can refer to each other
@@ -537,9 +543,10 @@ function update() {
   plan = Scheduler.schedule(state);
   fc = plan.unscheduled ? null : Scheduler.forecast(state);
   const hasEng = state.config.stages.some(s => s.kind === 'eng');
-  $('#summary').innerHTML = hasEng && plan.rows.length && plan.unscheduled === plan.rows.length
+  const inScope = plan.rows.length - plan.oos;
+  $('#summary').innerHTML = hasEng && inScope && plan.unscheduled === inScope
     ? `<span class="warn">No developers — engineering can't be scheduled</span>`
-    : `<b>${plan.rows.length}</b> use cases · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
+    : `<b>${inScope}</b> use cases${plan.oos ? ` <span class="muted">(+${plan.oos} out of scope)</span>` : ''} · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
       (fc ? ` · <span title="Monte Carlo: ${fc.iterations} simulated runs sampling effort between best and worst case">50%: <b>${fmt(fc.p50.date)}</b> · 80%: <b>${fmt(fc.p80.date)}</b> · 90%: <b>${fmt(fc.p90.date)}</b></span>` : '') +
       (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the delivery clock has not started. These are predicted assuming triage takes its estimated weeks (Setup tab), so their dates are tentative.">${plan.triage} in triage (tentative)</span>` : '') +
       (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '');
@@ -594,7 +601,7 @@ function setRange(a, b) {   // a, b = { c, p } (column index, row position)
 }
 const cellPos = el => ({ c: Number(el.dataset.ci), p: Number(el.dataset.p) });
 const gridActive = () => gsel && $('#gantt').contains(document.activeElement) && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
-const cellText = (it, key) => key === 'stage' ? (it.stage === TRIAGE ? 'Stakeholder Triage' : (state.config.stages.find(s => s.id === it.stage) || {}).name || '')
+const cellText = (it, key) => key === 'stage' ? (it.stage === TRIAGE ? 'Stakeholder Triage' : it.stage === OOS ? 'Out of scope' : (state.config.stages.find(s => s.id === it.stage) || {}).name || '')
   : key === 'priority' ? String(it.priority ?? '')
   : key === 'complexity' ? (state.config.complexities.find(c => c.key === it.complexity) || {}).name || ''
   : key === 'dependsOn' ? (it.dependsOn || []).map(d => displayId(d.id) + (d.until ? '>' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join(', ')
@@ -611,7 +618,7 @@ function parseCell(key, text, it) {
       if (!cand && /^\d+$/.test(low)) { const r = plan.rows[+low - 1], o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
       if (!cand) return { ok: false };
       let until = null;
-      if (st) { until = matchStage(st); if (!until || until === TRIAGE) return { ok: false }; }
+      if (st) { until = matchStage(st); if (!until || until === TRIAGE || until === OOS) return { ok: false }; }
       if (it && cand.id === it.id) continue;          // a use case can't depend on itself
       if (!out.some(d => d.id === cand.id)) out.push({ id: cand.id, until, fromBuild, holdBuild });
     }
@@ -835,9 +842,9 @@ function leftRows(ui = true) {
       const idText = displayId;
       const deps = (it.dependsOn || []);
       return { dep: deps.map(d => idText(d.id)).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
-        dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : '—' }; }));
+        dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '' }; }));
   return rows.map((r, i) => {
-    const vals = [i === 0 ? '' : r.id, r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
+    const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; vals[7] = (vals[7] || '–') + ' ▾'; }
     return { ...r, vals };
   });
@@ -859,8 +866,9 @@ function leftSVG(L, ui = true) {
     o += `<line x1="0" x2="${W}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
-      const dim = r.triage && k === 2;
+      const dim = (r.triage && k === 2) || r.oos;
       const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="12" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      if (r.comments && k === 1) { o += `<g><title>${esc(r.comments)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`; }
       o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
@@ -904,14 +912,19 @@ function rightSVG(L) {
     const y = HH + (i + 1) * RH;
     r.bars.forEach(b => {
       const x = L.XW(b.start), w = Math.max(2, L.XW(b.end) - x);
-      const tip = `<title>${esc(r.name)} — ${esc(b.name)}: ${esc(shortDate(b.startDate))} → ${esc(shortDate(b.endDate))} (${wk(b.end - b.start)} wks)</title>`;
-      if (b.type === 'queue') o += `<g>${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
+      const bl = b.blocker, blName = bl && bl.name, blStage = bl && bl.until ? ((state.config.stages.find(s => s.id === bl.until) || {}).name || bl.until) : '';
+      const tip = `<title>${esc(r.name)} — ${esc(b.name)}${blName ? ' on ' + esc(blName) + (bl.until ? ' to finish ' + esc(blStage) : ' to finish') + ' (' + esc(shortDate(L0(bl.at))) + ')' : ''}: ${esc(shortDate(b.startDate))} → ${esc(shortDate(b.endDate))} (${wk(b.end - b.start)} wks)</title>`;
+      if (b.key === 'depwait') {
+        o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#fff4e0" stroke="#e08a00" stroke-width="1.2" stroke-dasharray="4 2"/>`;
+        if (w > 60) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" font-weight="600" fill="#9a5b00">${esc(clip('⏳ Waiting on ' + (blName || 'a dependency'), w - 8))}</text>`;
+        o += '</g>';
+      } else if (b.type === 'queue') o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 9}" width="${w}" height="6" fill="url(#hatch)" stroke="#b3bac4" stroke-dasharray="3 2"/></g>`;
       else if (b.type === 'triage') {
-        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
+        o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="#e6e9ee" stroke="#8a94a3" stroke-dasharray="3 2"/>`;
         if (w > 40) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#5f6b7a">${esc(clip('Triage (est.)', w - 8))}</text>`;
         o += '</g>';
       } else {
-        o += `<g>${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
+        o += `<g data-r="${esc(r.id)}">${tip}<rect x="${x}" y="${y + 5}" width="${w}" height="${RH - 10}" rx="2" fill="${pal(b.stageIdx)}" ${r.triage ? 'fill-opacity=".55" ' : ''}stroke="rgba(0,0,0,.35)" stroke-width=".8"/>`;
         if (w > 64) o += `<text x="${x + 5}" y="${y + RH / 2 + 3.5}" font-size="11" fill="#fff">${esc(clip(b.name, w - 8))}</text>`;
         o += '</g>';
       }
@@ -919,14 +932,14 @@ function rightSVG(L) {
     const f = fc && fc.rows[r.id];
     if (f && r.end != null && f.p80 > r.end + 0.05) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;
-      o += `<g><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5f6b7a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5f6b7a"/></g>`;
+      o += `<g data-r="${esc(r.id)}"><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5f6b7a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5f6b7a"/></g>`;
     }
   });
   // dependency arrows (predecessor's completion point -> successor's start)
   (plan.links || []).forEach(l => {
     const pf = plan.rows.findIndex(r => r.id === l.from), pt = plan.rows.findIndex(r => r.id === l.to); if (pf < 0 || pt < 0) return;
     const y1 = HH + (pf + 1) * RH + RH / 2, y2 = HH + (pt + 1) * RH + RH / 2, x1 = L.XW(l.at), x2 = L.XW(l.toStart), xm = x1 + Math.min(6, Math.max(2, (x2 - x1) / 2));
-    o += `<g><title>Dependency: ${esc(plan.rows[pt].name)} starts after ${esc(plan.rows[pf].name)}</title><path d="M${x1},${y1} H${xm} V${y2} H${x2 - 1}" fill="none" stroke="#5f6b7a" stroke-width="1.2" opacity=".9"/><polygon points="${x2},${y2} ${x2 - 5},${y2 - 3} ${x2 - 5},${y2 + 3}" fill="#5f6b7a"/></g>`;
+    o += `<g class="dl" data-from="${esc(l.from)}" data-to="${esc(l.to)}"><title>Dependency: ${esc(plan.rows[pt].name)} starts after ${esc(plan.rows[pf].name)}</title><path class="dp" d="M${x1},${y1} H${xm} V${y2} H${x2 - 1}" fill="none" stroke="#5f6b7a" stroke-width="1.6" opacity=".9"/><polygon class="dh" points="${x2},${y2} ${x2 - 6},${y2 - 4} ${x2 - 6},${y2 + 4}" fill="#5f6b7a"/><circle cx="${x1}" cy="${y1}" r="2.5" fill="#5f6b7a" class="dh"/></g>`;
   });
   if (showToday()) {
     const now = Date.now();
@@ -937,13 +950,17 @@ function rightSVG(L) {
   }
   return o;
 }
+const L0 = w => Scheduler.addWeeks(Scheduler.parseDate(plan.startDate), w);
 const SVG_DEFS = `<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff"/><line x1="0" y1="0" x2="0" y2="6" stroke="#b3bac4" stroke-width="2.5"/></pattern></defs>`;
 
 function renderGantt() {
   if (activeTab !== 'timeline') return;
   const L = layout();
+  // Detach any open inline picker first: replacing the markup under a focused picker fires its blur handler mid-removal.
+  document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   $('#gantt').innerHTML = `<div class="gflex"><div class="gleft"><svg xmlns="http://www.w3.org/2000/svg" width="${lw()}" height="${L.height}">${SVG_DEFS}${leftSVG(L)}</svg></div>
     <div class="gscroll"><svg xmlns="http://www.w3.org/2000/svg" width="${L.width}" height="${L.height}">${SVG_DEFS}${rightSVG(L)}</svg></div></div>`;
+  ganttHover(null);
   $('#legend').innerHTML = legendItems().map(i => `<span><i style="background:${i.c}"></i>${esc(i.t)}</span>`).join('');
 }
 function legendItems() {
@@ -953,11 +970,11 @@ function legendItems() {
 
 function downloadCSV() {
   const cxName = k => (state.config.complexities.find(c => c.key === k) || {}).name || '';
-  const stName = k => (state.config.stages.find(x => x.id === k) || {}).name || '';
+  const stName = k => k === OOS ? 'Out of scope' : (state.config.stages.find(x => x.id === k) || {}).name || '';
   const q = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const idOf = id => { const i = state.items.find(x => x.id === id); return i ? (i.spId || i.name) : id; };
-  const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On']]
-    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; ')]));
+  const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On', 'Comments']]
+    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; '), i.comments || '']));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }));
   a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -981,3 +998,61 @@ function downloadPNG() {
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 init();
+
+
+// Hover highlighting: the row under the mouse, the use cases it waits on (amber) and the ones waiting on it (purple),
+// with the connecting arrows emphasised and everything else faded.
+let hoverRow = null;
+function chainOf(id) {
+  const links = plan.links || [], up = new Set(), down = new Set();
+  const walk = (set, from, key, other) => { const st = [from]; while (st.length) { const c = st.pop(); links.forEach(l => { if (l[key] === c && !set.has(l[other]) && l[other] !== id) { set.add(l[other]); st.push(l[other]); } }); } };
+  walk(up, id, 'to', 'from'); walk(down, id, 'from', 'to');
+  return { up, down };
+}
+function ganttHover(id) {
+  const g = $('#gantt'); if (!g || !plan) return;
+  hoverRow = id;
+  const svgs = g.querySelectorAll('svg');
+  g.querySelectorAll('.hlband').forEach(x => x.remove());
+  g.querySelectorAll('[data-r]').forEach(x => x.style.opacity = '');
+  g.querySelectorAll('.dl').forEach(x => { x.style.opacity = ''; x.querySelector('.dp').setAttribute('stroke', '#5f6b7a'); x.querySelector('.dp').setAttribute('stroke-width', '1.6'); x.querySelectorAll('.dh').forEach(h => h.setAttribute('fill', '#5f6b7a')); });
+  let info = document.getElementById('chaininfo');
+  if (!info) { info = document.createElement('div'); info.id = 'chaininfo'; info.className = 'hint'; $('#legend').insertAdjacentElement('afterend', info); }
+  if (!id) { info.textContent = 'Hover a row to see what it waits on and what waits on it.'; return; }
+  const { up, down } = chainOf(id), all = new Set([id, ...up, ...down]);
+  const name = x => (plan.rows.find(r => r.id === x) || {}).name || x;
+  const tint = x => x === id ? 'rgba(47,111,237,.14)' : up.has(x) ? 'rgba(224,138,0,.18)' : 'rgba(124,58,237,.14)';
+  svgs.forEach((svg, si) => {
+    const bg = svg.querySelector(':scope > rect'); const ref = bg.nextSibling;
+    plan.rows.forEach((r, i) => {
+      if (!all.has(r.id)) return;
+      const rc = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rc.setAttribute('class', 'hlband'); rc.setAttribute('x', 0); rc.setAttribute('width', svg.getAttribute('width'));
+      rc.setAttribute('y', HH + (i + 1) * RH); rc.setAttribute('height', RH); rc.setAttribute('fill', tint(r.id)); rc.setAttribute('pointer-events', 'none');
+      svg.insertBefore(rc, ref);
+    });
+  });
+  g.querySelectorAll('[data-r]').forEach(x => { if (!all.has(x.dataset.r)) x.style.opacity = '.3'; });
+  g.querySelectorAll('.dl').forEach(x => {
+    const f = x.dataset.from, t = x.dataset.to;
+    const hit = (t === id || up.has(t)) && up.has(f) || (f === id || down.has(f)) && down.has(t) || (t === id && f !== id && up.has(f)) || (f === id && down.has(t));
+    if (!hit) { x.style.opacity = '.12'; return; }
+    const col = (t === id || up.has(t)) ? '#e08a00' : '#7c3aed';
+    x.querySelector('.dp').setAttribute('stroke', col); x.querySelector('.dp').setAttribute('stroke-width', '2.6'); x.querySelectorAll('.dh').forEach(h => h.setAttribute('fill', col));
+  });
+  const parts = [];
+  if (up.size) parts.push(`<b style="color:#9a5b00">Waits on</b> ${[...up].map(x => esc(name(x))).join(', ')}`);
+  if (down.size) parts.push(`<b style="color:#6d28d9">Blocks</b> ${[...down].map(x => esc(name(x))).join(', ')}`);
+  info.innerHTML = `<b>${esc(name(id))}</b>` + (parts.length ? ' — ' + parts.join(' · ') : ' — no dependencies');
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const g = $('#gantt'); if (!g) return;
+  g.addEventListener('mousemove', e => {
+    if (!plan || !e.target.closest) return;
+    const svg = e.target.closest('svg'); if (!svg) return;
+    const zf = Number(document.body.style.zoom) || 1, y = (e.clientY - svg.getBoundingClientRect().top) / zf;
+    const i = Math.floor((y - HH) / RH) - 1, r = i >= 0 ? plan.rows[i] : null, id = r ? r.id : null;
+    if (id !== hoverRow) ganttHover(id);
+  });
+  g.addEventListener('mouseleave', () => { if (hoverRow) ganttHover(null); });
+});

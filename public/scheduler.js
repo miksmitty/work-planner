@@ -25,6 +25,7 @@
   }
 
   const TRIAGE = 'triage';
+  const OOS = 'oos';   // out of scope: kept in the list, never scheduled
   // SME REQUIRED by the use case: stretch applied to SME-dependent stages. Stage default lengths assume
   // little SME involvement (Low = no delay). Assumption, editable in the app.
   const DEFAULT_SME = () => ({ L: 1, M: 1.25, H: 1.6 });
@@ -41,9 +42,8 @@
   ];
 
   function defaultState() {
-    // Sample portfolio spread across the pipeline: most advanced first, then priority.
-    const stagePlan = ['eng', 'eng', 'release', 'operate', 'feasibility', 'feasibility', 'discovery', 'discovery',
-      'ideation', 'ideation', 'ideation', 'ideation', TRIAGE, TRIAGE, TRIAGE, TRIAGE, TRIAGE];
+    // Sample portfolio: a forward plan, so every use case starts at Ideation.
+    const stagePlan = Array(17).fill('ideation');
     const items = [];
     for (let i = 1; i <= 17; i++) {
       items.push({
@@ -120,7 +120,8 @@
     const first = c.stages[0] && c.stages[0].id;
     state.items.forEach(it => {
       if (!it.overrides) it.overrides = {};
-      if (it.stage !== TRIAGE && !c.stages.some(s => s.id === it.stage)) it.stage = first; // missing / removed stage
+      if (it.stage !== TRIAGE && it.stage !== OOS && !c.stages.some(s => s.id === it.stage)) it.stage = first; // missing / removed stage
+      if (typeof it.comments !== 'string') it.comments = '';
       if (it.priority === undefined || it.priority === '') it.priority = null;
       if (it.stageStart === undefined) it.stageStart = null;
       if (it.triageWeeks === undefined || it.triageWeeks === '') it.triageWeeks = null;
@@ -139,21 +140,27 @@
   // Position in the pipeline: -1 = Stakeholder Triage (clock not started), 0.. = index of the current stage.
   function stageRank(state, it) {
     if (it.stage === TRIAGE) return -1;
+    if (it.stage === OOS) return -2;   // sorts after everything else
     const i = state.config.stages.findIndex(s => s.id === it.stage);
     return i < 0 ? 0 : i;
   }
   const prioVal = it => (it.priority == null || it.priority === '' || isNaN(Number(it.priority))) ? Infinity : Number(it.priority);
-  // Most advanced stage first, then priority (1 = highest), then original order.
+  // Work already under way goes first (most advanced stage, then priority). Everything not yet started
+  // (Stakeholder Triage or an unstarted first stage) is ordered purely by priority (1 = highest), then original order,
+  // so raising a priority moves it ahead of lower-priority work whatever its stage.
+  const underWay = (state, it) => { const r = stageRank(state, it); return r > 0 || (r === 0 && !!it.stageStart); };
   function orderItems(state) {
-    return state.items.map((it, i) => ({ it, i, rank: stageRank(state, it), p: prioVal(it) }))
-      .sort((a, b) => (b.rank - a.rank) || (a.p === b.p ? 0 : a.p < b.p ? -1 : 1) || (a.i - b.i))
+    return state.items.map((it, i) => ({ it, i, rank: stageRank(state, it), uw: underWay(state, it), p: prioVal(it) }))
+      .sort((a, b) => (b.uw - a.uw) || (a.uw ? (b.rank - a.rank) : 0) || (a.p === b.p ? 0 : a.p < b.p ? -1 : 1) || (a.i - b.i))
       .map(x => x.it);
   }
 
   function schedule(state, opts = {}) {
     normalize(state);
     const { config } = state;
-    const items = orderItems(state);
+    const allItems = orderItems(state);
+    const items = allItems.filter(it => it.stage !== OOS);
+    const oosItems = allItems.filter(it => it.stage === OOS);
     const start = parseDate(config.startDate);
     const stages = config.stages;
     const engIdx = stages.findIndex(s => s.kind === 'eng');
@@ -282,6 +289,12 @@
       }
     }
 
+    // The dependency that is holding a use case back the longest (shown on its "Waiting for a dependency" bar).
+    const crit = list => {
+      let best = null, bt = -1;
+      list.forEach(d => { const e = depEnd(d) || 0; if (e >= bt) { bt = e; best = d; } });
+      return best ? { id: best.id, name: rowById[best.id].item.name, until: best.until || null, at: bt } : null;
+    };
     let overallEnd = 0;
     const out = rows.map(r => {
       const it = r.item, bars = [];
@@ -293,7 +306,7 @@
       const waitFrom = r.triage ? r.triageW : r.earliest;
       if (r.started && r.startWk > waitFrom + 1e-9) {
         const depTo = Math.min(r.startWk, r.startDepAt ?? r.depAt);   // part of the wait that is a dependency, then any wait for capacity
-        if (depTo > waitFrom + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: waitFrom, end: depTo });
+        if (depTo > waitFrom + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: waitFrom, end: depTo, blocker: crit(r.deps.filter(d => !d.holdBuild)) });
         const from = Math.max(waitFrom, depTo);
         if (r.startWk > from + 1e-9) bars.push({ key: 'wait', stageId: null, name: 'Waiting for capacity to start', type: 'queue', start: from, end: r.startWk });
       }
@@ -305,7 +318,7 @@
           if (!scheduled) continue;
           if (r.engStart > t) {
             const depTo = (r.forced || r.holds) ? Math.min(r.engStart, Math.max(t, r.depAt)) : t;   // part of the wait that is a dependency
-            if (depTo > t + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: t, end: depTo });
+            if (depTo > t + 1e-9) bars.push({ key: 'depwait', stageId: null, name: 'Waiting for a dependency', type: 'queue', start: t, end: depTo, blocker: crit(r.forced ? r.deps : r.deps.filter(d => d.holdBuild)) });
             if (r.engStart > depTo + 1e-9) bars.push({ key: 'queue', stageId: null, name: 'Waiting for developers', type: 'queue', start: depTo, end: r.engStart });
           }
           push(s, i, r.engStart, r.engEnd);
@@ -339,13 +352,17 @@
       const at = d.until && from.stageEnd[d.until] != null ? from.stageEnd[d.until] : (d.until ? from.begin : from.end);
       links.push({ from: d.id, to: r.item.id, at, toStart: to.begin });
     }));
+    // Out-of-scope use cases stay in the list (greyed, no bars) but take no part in the plan.
+    oosItems.forEach(it => out.push({ id: it.id, name: it.name, complexity: it.complexity, stage: it.stage, stageName: 'Out of scope', priority: it.priority, sme: it.sme, reuse: it.reuse, buildsOn: it.buildsOn,
+      oos: true, triage: false, effort: 0, effortBase: 0, scheduled: false, teamCap: null, queueWeeks: null, bars: [], begin: 0, depIssue: null, skipsToBuild: false, stageEnd: {}, end: null, endDate: null, reuseApplied: false, reuseSaved: 0, reusePending: false }));
     return {
       links,
       startDate: config.startDate, rows: out, totalWeeks: overallEnd,
       endDate: fmtDate(addWeeks(start, overallEnd)),
       totalEffort: rows.reduce((s, r) => s + r.effort, 0),
       triage: out.filter(r => r.triage).length,
-      unscheduled: out.filter(r => !r.scheduled).length,
+      unscheduled: out.filter(r => !r.scheduled && !r.oos).length,
+      oos: oosItems.length,
     };
   }
 
@@ -396,7 +413,7 @@
     return { p50: summary(.5), p80: summary(.8), p90: summary(.9), rows: rowsOut, iterations };
   }
 
-  const api = { schedule, forecast, defaultState, normalize, orderItems, stageRank, pertMean, parseDate, fmtDate, addWeeks, TRIAGE };
+  const api = { schedule, forecast, defaultState, normalize, orderItems, stageRank, pertMean, parseDate, fmtDate, addWeeks, TRIAGE, OOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Scheduler = api;
 })(typeof window !== 'undefined' ? window : globalThis);
