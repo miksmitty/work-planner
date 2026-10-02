@@ -62,6 +62,7 @@ function bind() {
   $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
   document.querySelectorAll('.capbar .setting').forEach(el => { const h = el.querySelector('.hint'); if (h) el.title = h.textContent.trim(); });
   const g = $('#gantt');
+  g.addEventListener('click', e => { const c = e.target.closest && e.target.closest('[data-cmt]'); if (c) editComment(c); });
   g.addEventListener('mousedown', e => {
     const hd = e.target.closest('[data-resize]'); if (!hd) return;
     e.preventDefault();
@@ -154,6 +155,21 @@ function pickDeps(rect) {
   pop.querySelector('.dp-ok').onclick = () => close(true); pop.querySelector('.dp-x').onclick = () => close(false);
   pop.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); close(true); } });
   pop.querySelector('.dp-filter').focus();
+}
+function editComment(rect) {
+  document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
+  const it = state.items.find(x => x.id === rect.dataset.id); if (!it) return;
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect(), zf = Number(document.body.style.zoom) || 1;
+  const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'cxpick'; inp.value = it.comments || '';
+  inp.style.cssText = `left:${(rr.left - br.left) / zf}px;top:${(rr.top - br.top) / zf}px;width:${Math.max(rr.width, 320) / zf}px;height:${rr.height / zf}px`;
+  let done = false;
+  const finish = save => { if (done) return; done = true; inp.onblur = null; const v = inp.value.trim();
+    if (inp.parentNode) inp.parentNode.removeChild(inp);
+    if (save && v !== (it.comments || '')) { pushUndo(); it.comments = v; renderRows(); update(); }
+    $('#gantt').focus({ preventScroll: true }); };
+  inp.onkeydown = e => { if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); e.stopPropagation(); };
+  inp.onblur = () => finish(true);
+  box.appendChild(inp); inp.focus(); inp.select();
 }
 function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
@@ -768,6 +784,7 @@ const COLHELP = {
   sme: 'SME required: how much subject-matter-expert time the use case needs (H / M / L). Higher stretches the SME-flagged stages.',
   reuse: 'Reuse: how much of the plumbing already exists from earlier deliveries (H / M / L). Higher reduces Build effort.',
   dep: 'Depends on: use cases (by ID) that must finish first before this one can start (finish-to-start). A use case already under way keeps running its current stage; its Build waits. Click a cell to choose them (or edit under "details" on the Use cases tab); copy/paste uses IDs, with ">Stage" for "until that stage completes", e.g. "12>Build, 15". Add " @build" (e.g. "12 @build") for a dependency that lets this use case skip its earlier stages and start at Build once that predecessor is done. Grey arrows in the chart show each link.',
+  cmt: 'Free-text notes for the use case. Click a cell to edit; the full text shows on hover.',
   dur: 'Predicted elapsed weeks from when work starts to when the use case finishes.',
   start: 'Predicted date work starts (the first stage after any triage period). ~ marks a tentative date for a use case still in Stakeholder Triage.',
   end: 'Predicted finish date at the end of the last stage. ~ marks a tentative date for a use case still in Stakeholder Triage.',
@@ -775,7 +792,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88, cmt: 220 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -787,7 +804,7 @@ function loadColW() {
 let COLW = loadColW();
 const saveColW = () => lsSet('colW', JSON.stringify(COLW));
 const cols = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
-  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish']];
+  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish'], ['cmt', COLW.cmt, 'Comments']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -845,7 +862,7 @@ function leftRows(ui = true) {
       return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '' }; }));
   return rows.map((r, i) => {
-    const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
+    const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—'), r.comments || ''];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; vals[7] = (vals[7] || '–') + ' ▾'; }
     return { ...r, vals };
   });
@@ -874,7 +891,8 @@ function leftSVG(L, ui = true) {
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
       const hit = (kind, k) => `<rect data-cell data-ci="${k}" data-p="${i - 1}" data-id="${esc(r.itemId)}" data-pick="${kind}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Click to change · drag to select a range (then Ctrl/Cmd+C, Ctrl/Cmd+V) · shift-click extends</title></rect>`;
-      o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6) + hit('dep', 7);
+      o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6) + hit('dep', 7)
+        + `<rect data-cmt data-id="${esc(r.itemId)}" x="${xs[11]}" y="${y}" width="${cs[11][1]}" height="${RH}" fill="transparent" style="cursor:text"><title>${esc(r.comments || 'Click to add a comment')}</title></rect>`;
     }
   });
   if (selPos.length) {   // outline + fill handle
