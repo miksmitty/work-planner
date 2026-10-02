@@ -775,7 +775,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 84, dur: 66, start: 88, end: 88 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -841,7 +841,7 @@ function leftRows(ui = true) {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
       const idText = displayId;
       const deps = (it.dependsOn || []);
-      return { dep: deps.map(d => idText(d.id)).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
+      return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '' }; }));
   return rows.map((r, i) => {
     const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—')];
