@@ -1022,7 +1022,8 @@ function ganttHover(id) {
   const { up, down } = chainOf(id), all = new Set([id, ...up, ...down]);
   const name = x => (plan.rows.find(r => r.id === x) || {}).name || x;
   const tint = x => x === id ? 'rgba(47,111,237,.14)' : up.has(x) ? 'rgba(224,138,0,.18)' : 'rgba(124,58,237,.14)';
-  svgs.forEach((svg, si) => {
+  svgs.forEach(svg => {
+    if (!svg.closest('.gscroll')) return;
     const bg = svg.querySelector(':scope > rect'); const ref = bg.nextSibling;
     plan.rows.forEach((r, i) => {
       if (!all.has(r.id)) return;
@@ -1050,6 +1051,7 @@ document.addEventListener('DOMContentLoaded', () => {
   g.addEventListener('mousemove', e => {
     if (!plan || !e.target.closest) return;
     const svg = e.target.closest('svg'); if (!svg) return;
+    if (!svg.closest('.gscroll')) { if (hoverRow) ganttHover(null); return; }   // only the chart side, not the table
     const zf = Number(document.body.style.zoom) || 1, y = (e.clientY - svg.getBoundingClientRect().top) / zf;
     const i = Math.floor((y - HH) / RH) - 1, r = i >= 0 ? plan.rows[i] : null, id = r ? r.id : null;
     if (id !== hoverRow) ganttHover(id);
