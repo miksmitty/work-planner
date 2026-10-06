@@ -312,9 +312,49 @@ function renderSizes() {
 }
 
 /* ---- use cases: simple row + optional details ---- */
+const view = { key: null, dir: 1, filters: {} };   // Use cases table: sort column/direction and per-column filter text
+function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), sort: comparable value }
+  const r = plan && plan.rows.find(x => x.id === it.id), lab = (list, key) => (list.find(c => c.key === key) || {}).name || key || '';
+  const eng = r && r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng'), f = fc && fc.rows[it.id];
+  const d = (date, pre) => ({ text: date ? (pre || '') + fmt(date) : '', sort: date ? new Date(date).getTime() : null });
+  switch (k) {
+    case 'num': return { text: String(rank), sort: rank };
+    case 'id': return { text: it.spId || '', sort: it.spId || '' };
+    case 'name': return { text: it.name || '', sort: it.name || '' };
+    case 'stage': { const st = state.config.stages.find(s => s.id === it.stage); return { text: st ? st.name : String(it.stage || ''), sort: Math.max(0, state.config.stages.findIndex(s => s.id === it.stage)) }; }
+    case 'priority': return { text: it.priority ?? '', sort: it.priority ?? null };
+    case 'complexity': return { text: lab(state.config.complexities, it.complexity), sort: lab(state.config.complexities, it.complexity) };
+    case 'sme': return { text: it.sme || '', sort: ['Low', 'Medium', 'High'].indexOf(it.sme) };
+    case 'reuse': return { text: it.reuse || '', sort: ['Low', 'Medium', 'High'].indexOf(it.reuse) };
+    case 'eng': return eng ? d(eng.startDate) : { text: '', sort: null };
+    case 'end': return r ? d(r.endDate, r.triage ? '~' : '') : { text: '', sort: null };
+    case 'p80': return f ? d(f.p80Date) : { text: '', sort: null };
+    case 'comments': return { text: it.comments || '', sort: it.comments || '' };
+  }
+}
+function viewItems() {
+  let list = Scheduler.orderItems(state).map((it, i) => ({ it, rank: i + 1 }));
+  const fs = Object.entries(view.filters).filter(([, v]) => v);
+  if (fs.length) list = list.filter(x => fs.every(([k, v]) => String(viewVal(x.it, x.rank, k).text).toLowerCase().includes(v.toLowerCase())));
+  if (view.key) list.sort((a, b) => {
+    const x = viewVal(a.it, a.rank, view.key).sort, y = viewVal(b.it, b.rank, view.key).sort;
+    if (x == null || x === '' ) return (y == null || y === '') ? 0 : 1;   // blanks always last
+    if (y == null || y === '') return -1;
+    return view.dir * (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' }));
+  });
+  return list;
+}
+document.querySelectorAll('th[data-sort]').forEach(th => th.onclick = () => {
+  const k = th.dataset.sort;
+  if (view.key !== k) { view.key = k; view.dir = 1; } else if (view.dir === 1) view.dir = -1; else view.key = null;
+  renderRows();
+});
+document.querySelectorAll('input[data-filter]').forEach(i => i.oninput = () => { view.filters[i.dataset.filter] = i.value.trim(); renderRows(); });
+$('#clearfilters').onclick = () => { view.filters = {}; document.querySelectorAll('input[data-filter]').forEach(i => i.value = ''); renderRows(); };
 function renderRows() {
   const tb = $('#rows'); tb.innerHTML = '';
-  Scheduler.orderItems(state).forEach((it, i) => {
+  document.querySelectorAll('th[data-sort]').forEach(th => { th.classList.toggle('asc', th.dataset.sort === view.key && view.dir === 1); th.classList.toggle('desc', th.dataset.sort === view.key && view.dir === -1); });
+  viewItems().forEach(({ it, rank: i1 }) => { const i = i1 - 1;
     const tr = document.createElement('tr'); tr.dataset.id = it.id; tr.classList.toggle('oos', it.stage === OOS);
     const opts = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
     const link = itemUrl(it);

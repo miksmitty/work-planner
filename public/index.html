@@ -53,7 +53,7 @@
   <section class="panel" id="tab-cases" hidden>
     <div class="card">
       <div class="toolbar">
-        <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order.</span>
+        <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order. Click a column heading to sort (click again to reverse, a third time to restore); type in the boxes to filter.</span>
         <span class="grow"></span>
         <button class="primary" id="add">+ Add</button>
         <button id="bulk">Bulk add…</button>
@@ -63,21 +63,19 @@
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
-        <thead><tr>
-          <th title="Row number in the current order (most advanced stage first, then priority)">#</th>
-          <th title="SharePoint ID. Click to open the item; the link comes from the item's own URL or the Base URL on the Setup tab.">ID</th>
-          <th title="Name of the use case">Name</th>
-          <th title="Current stage. 0. Stakeholder Triage means the delivery clock has not started; it is predicted after the estimated triage weeks. Earlier stages than the current one are skipped.">Stage</th>
-          <th title="Priority, 1 = highest. Sorted by most advanced stage first, then priority; developers are handed out in the same order.">Priority</th>
-          <th title="Complexity. Sets the Build effort in developer-weeks (Engineering size on the Setup tab).">Complexity</th>
-          <th title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low). Higher stretches the SME-flagged stages.">SME req.</th>
-          <th title="Reuse: how much of the plumbing already exists from earlier deliveries (High / Medium / Low). Higher reduces Build effort.">Reuse</th>
-          <th title="Predicted Build dates. 'queued' = waiting for a free developer; 'reuse saves' = dev-weeks saved; 'reuse pending' = builds on a use case not yet built.">Engineering</th>
-          <th title="Predicted finish date. ~ = tentative (still in Stakeholder Triage).">Planned finish</th>
-          <th title="Date the use case is 80% likely to be finished by (Monte Carlo forecast).">80% confident</th>
-          <th title="Free-text notes">Comments</th>
-          <th></th>
-        </tr></thead>
+        <thead><tr><th class="sortable" data-sort="num" title="Row number in the current order (most advanced stage first, then priority)">#</th>
+          <th class="sortable" data-sort="id" title="SharePoint ID. Click to open the item; the link comes from the item's own URL or the Base URL on the Setup tab.">ID</th>
+          <th class="sortable" data-sort="name" title="Name of the use case">Name</th>
+          <th class="sortable" data-sort="stage" title="Current stage. 0. Stakeholder Triage means the delivery clock has not started; it is predicted after the estimated triage weeks. Earlier stages than the current one are skipped.">Stage</th>
+          <th class="sortable" data-sort="priority" title="Priority, 1 = highest. Sorted by most advanced stage first, then priority; developers are handed out in the same order.">Priority</th>
+          <th class="sortable" data-sort="complexity" title="Complexity. Sets the Build effort in developer-weeks (Engineering size on the Setup tab).">Complexity</th>
+          <th class="sortable" data-sort="sme" title="SME required: how much subject-matter-expert time this use case needs (High / Medium / Low). Higher stretches the SME-flagged stages.">SME req.</th>
+          <th class="sortable" data-sort="reuse" title="Reuse: how much of the plumbing already exists from earlier deliveries (High / Medium / Low). Higher reduces Build effort.">Reuse</th>
+          <th class="sortable" data-sort="eng" title="Predicted Build dates. 'queued' = waiting for a free developer; 'reuse saves' = dev-weeks saved; 'reuse pending' = builds on a use case not yet built.">Engineering</th>
+          <th class="sortable" data-sort="end" title="Predicted finish date. ~ = tentative (still in Stakeholder Triage).">Planned finish</th>
+          <th class="sortable" data-sort="p80" title="Date the use case is 80% likely to be finished by (Monte Carlo forecast).">80% confident</th>
+          <th class="sortable" data-sort="comments" title="Free-text notes">Comments</th>
+          <th></th></tr><tr><th class="filt"></th><th class="filt"><input type="search" data-filter="id" placeholder="Filter" aria-label="Filter id"></th><th class="filt"><input type="search" data-filter="name" placeholder="Filter" aria-label="Filter name"></th><th class="filt"><input type="search" data-filter="stage" placeholder="Filter" aria-label="Filter stage"></th><th class="filt"><input type="search" data-filter="priority" placeholder="Filter" aria-label="Filter priority"></th><th class="filt"><input type="search" data-filter="complexity" placeholder="Filter" aria-label="Filter complexity"></th><th class="filt"><input type="search" data-filter="sme" placeholder="Filter" aria-label="Filter sme"></th><th class="filt"><input type="search" data-filter="reuse" placeholder="Filter" aria-label="Filter reuse"></th><th class="filt"><input type="search" data-filter="eng" placeholder="Filter" aria-label="Filter eng"></th><th class="filt"><input type="search" data-filter="end" placeholder="Filter" aria-label="Filter end"></th><th class="filt"><input type="search" data-filter="p80" placeholder="Filter" aria-label="Filter p80"></th><th class="filt"><input type="search" data-filter="comments" placeholder="Filter" aria-label="Filter comments"></th><th class="filt"><button class="ghost" id="clearfilters" title="Clear all filters">Clear</button></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>

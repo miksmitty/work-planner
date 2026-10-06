@@ -213,3 +213,8 @@ input.comment { width: 180px; }
 td[data-c="eng"] { white-space:normal; min-width:200px; line-height:1.3; }
 td input[type=text] { min-width:110px; }
 input.comment { width:100%; min-width:120px; }
+
+th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+th.sortable:hover { background:#eef1f5; }
+th.sortable.asc::after { content:" ▲"; font-size:10px; } th.sortable.desc::after { content:" ▼"; font-size:10px; }
+th.filt { padding:2px 4px; } th.filt input { width:100%; min-width:50px; box-sizing:border-box; font-weight:400; }
