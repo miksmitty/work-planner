@@ -83,6 +83,13 @@
 
   <section class="panel" id="tab-stages" hidden>
     <div class="card" id="settings">
+      <div class="toolbar">
+        <span class="hint">Setup = developers, limits, start date, stages, engineering sizes, SME and Reuse factors and the SharePoint base URL. Use cases are not included (use Download CSV on the Use cases tab).</span>
+        <span class="grow"></span>
+        <button id="setupexport" title="Download the setup as a JSON file">Export setup</button>
+        <button id="setupimport" title="Replace the setup with one from an exported JSON file">Import setup…</button>
+        <span class="hint" id="setupMsg"></span>
+      </div>
       <div class="row">
         <div class="lbl">Stages</div>
         <div class="chips" id="stages"></div>

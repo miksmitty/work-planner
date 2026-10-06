@@ -97,6 +97,8 @@ function bind() {
   $('#today').onchange = () => { try { localStorage.setItem('todayLine', $('#today').checked ? '1' : '0'); } catch {} renderGantt(); };
   $('#png').onclick = downloadPNG;
   $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; saveColW(); renderGantt(); };
+  $('#setupexport').onclick = exportSetup;
+  $('#setupimport').onclick = importSetup;
   $('#add').onclick = () => { state.items.push(newItem('New use case')); renderRows(); update(); };
   $('#import').onclick = openImport;
   $('#export').onclick = downloadCSV;
@@ -601,6 +603,35 @@ function showImport(rows, fileName) {
   dlg.showModal();
 }
 
+/* ---- Setup export / import (state.config as JSON; use cases travel separately as CSV) ---- */
+function exportSetup() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'work-planner-setup', version: 1, config: state.config }, null, 2)], { type: 'application/json' }));
+  a.download = `work-planner-setup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+  $('#setupMsg').textContent = 'Setup exported';
+}
+function applySetup(text) {
+  let d; try { d = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
+  const c = d && d.app === 'work-planner-setup' ? d.config : null;
+  if (!c || typeof c !== 'object') throw new Error('That file is not a Work Planner setup export.');
+  if (!Array.isArray(c.stages) || !c.stages.length || !Array.isArray(c.complexities) || !c.complexities.length) throw new Error('The setup file has no stages or complexities.');
+  const trial = Scheduler.normalize({ config: JSON.parse(JSON.stringify(c)), items: [] }).config;   // validate/heal on a copy first
+  state.config = trial;
+  const dflt = trial.complexities[1]?.key || trial.complexities[0].key;
+  state.items.forEach(it => { if (!trial.complexities.some(x => x.key === it.complexity)) it.complexity = dflt; });
+  Scheduler.normalize(state);   // moves use cases in removed stages to the first stage, drops stale overrides and dependency stages
+  syncInputs(); renderStages(); renderSizes(); renderSme(); renderReuse(); renderRows(); update();
+  $('#setupMsg').textContent = `Imported setup: ${trial.stages.length} stages, ${trial.complexities.length} sizes`;
+}
+function importSetup() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try { const t = await f.text(); if (!confirm('Replace the current setup (stages, sizes, factors, developers, start date, base URL) with the one in ' + f.name + '? Use cases are kept.')) return; applySetup(t); }
+    catch (e) { $('#setupMsg').textContent = e.message; alert(e.message); }
+  };
+  inp.click();
+}
 /* ---- Gantt sort: click a column heading; reorders plan.rows (every Gantt row lookup goes through that array) ---- */
 const gsort = { key: null, dir: 1 };
 function sortGantt() {
