@@ -107,17 +107,17 @@ c.items[0].stage = 'feasibility';
 c.items[0].stageStart = '2025-12-22'; // 2 weeks before the plan starts
 assert.strictEqual(eng(schedule(c).rows[0]).start, 4 - 2);
 
-// Sort order: most advanced stage first, then priority (1 = highest); triage last.
+// Sort order: work under way first (most advanced stage, then priority); unstarted work (incl. triage) purely by priority (1 = highest).
 c = state(4, ['low', 'low', 'low', 'low', 'low']);
 c.items[0].stage = 'ideation';  c.items[0].priority = 1;
 c.items[1].stage = 'eng';       c.items[1].priority = 9;
 c.items[2].stage = 'ideation';  c.items[2].priority = 2;
 c.items[3].stage = TRIAGE;      c.items[3].priority = 1;
 c.items[4].stage = 'eng';       c.items[4].priority = 3;
-assert.deepStrictEqual(orderItems(c).map(i => i.id), ['x4', 'x1', 'x0', 'x2', 'x3']);
-assert.deepStrictEqual(schedule(c).rows.map(x => x.id), ['x4', 'x1', 'x0', 'x2', 'x3']);   // triage row still sorts last
+assert.deepStrictEqual(orderItems(c).map(i => i.id), ['x4', 'x1', 'x0', 'x3', 'x2']);
+assert.deepStrictEqual(schedule(c).rows.map(x => x.id), ['x4', 'x1', 'x0', 'x3', 'x2']);   // triage P1 ties with x0 and keeps original order, ahead of P2
 c.items[2].priority = null; // no priority sorts after numbered ones
-assert.deepStrictEqual(orderItems(c).map(i => i.id).slice(2, 4), ['x0', 'x2']);
+assert.deepStrictEqual(orderItems(c).map(i => i.id).slice(2, 4), ['x0', 'x3']);
 
 // Developers go to the more advanced use case first, even with a worse priority number.
 c = state(2, ['high', 'high']);

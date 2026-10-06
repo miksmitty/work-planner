@@ -62,7 +62,13 @@ function bind() {
   $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
   document.querySelectorAll('.capbar .setting').forEach(el => { const h = el.querySelector('.hint'); if (h) el.title = h.textContent.trim(); });
   const g = $('#gantt');
-  g.addEventListener('click', e => { const c = e.target.closest && e.target.closest('[data-cmt]'); if (c) editComment(c); });
+  g.addEventListener('click', e => {
+    const c = e.target.closest && e.target.closest('[data-cmt]'); if (c) return editComment(c);
+    const h = e.target.closest && e.target.closest('[data-gsort]'); if (!h) return;
+    const k = h.dataset.gsort;
+    if (gsort.key !== k) { gsort.key = k; gsort.dir = 1; } else if (gsort.dir === 1) gsort.dir = -1; else gsort.key = null;
+    update();
+  });
   g.addEventListener('mousedown', e => {
     const hd = e.target.closest('[data-resize]'); if (!hd) return;
     e.preventDefault();
@@ -575,9 +581,10 @@ function showImport(rows, fileName) {
     if (mode === 'replace') state.items = [];
     const dflt = state.config.complexities[1]?.key || state.config.complexities[0].key;
     const applied = [];
+    const own = i => (i.url && i.url !== resolveBase(prefix || state.config.spLinkBase, i.spId)) ? i.url : null;   // a link that is just base URL + ID stays derived
     p.items.forEach(i => {
-      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (i.url) i.existing.url = i.url; if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; if (i.comments) i.existing.comments = i.comments; return; }
-      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: i.url || null, complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, reuse: i.reuse || null, buildsOn: null, stageStart: null,
+      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (own(i)) i.existing.url = own(i); if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; if (i.comments) i.existing.comments = i.comments; return; }
+      state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: own(i), complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, reuse: i.reuse || null, buildsOn: null, stageStart: null,
         teamCap: null, effortOverride: null, earliestStart: null, comments: i.comments || '', overrides: {} });
       applied.push([i, state.items[state.items.length - 1]]);
     });
@@ -594,10 +601,27 @@ function showImport(rows, fileName) {
   dlg.showModal();
 }
 
+/* ---- Gantt sort: click a column heading; reorders plan.rows (every Gantt row lookup goes through that array) ---- */
+const gsort = { key: null, dir: 1 };
+function sortGantt() {
+  if (!gsort.key) return;
+  const k = gsort.key, rows = leftRows(false).slice(1), pos = new Map(plan.rows.map((r, i) => [r, i]));
+  const val = i => { const r = rows[i]; let v = ({ id: r.id, name: r.name, stage: r.stage, pri: r.pri, cx: r.cx, sme: ['Low', 'Medium', 'High'].indexOf(r.sme), reuse: ['Low', 'Medium', 'High'].indexOf(r.reuse),
+    dep: r.dep, dur: r.dur, start: r.start, end: r.end, cmt: r.comments })[k]; if (v instanceof Date) v = v.getTime(); return v === '' || v === undefined || v === null || v === -1 ? null : v; };
+  const keyed = plan.rows.map((r, i) => ({ r, v: val(i), i }));
+  keyed.sort((a, b) => {
+    if (a.v == null || b.v == null) return a.v == null ? (b.v == null ? a.i - b.i : 1) : -1;   // blanks last
+    const c = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : String(a.v).localeCompare(String(b.v), undefined, { numeric: true, sensitivity: 'base' });
+    return c ? c * gsort.dir : a.i - b.i;
+  });
+  plan.rows = keyed.map(x => x.r);
+}
 /* ---- recompute + draw ---- */
 function update() {
   plan = Scheduler.schedule(state);
   fc = plan.unscheduled ? null : Scheduler.forecast(state);
+  plan.rows.forEach((r, i) => r.rank = i + 1);   // default-order number, so the numbers shown for items without an ID don't change when the Gantt is sorted
+  sortGantt();
   const hasEng = state.config.stages.some(s => s.kind === 'eng');
   const inScope = plan.rows.length - plan.oos;
   $('#summary').innerHTML = hasEng && inScope && plan.unscheduled === inScope
@@ -641,7 +665,7 @@ let fillPrev = null;     // { p0, p1 } rows previewed while dragging the fill ha
 const undoStack = [];
 const rowPos = id => plan.rows.findIndex(r => r.id === id);
 // How a use case is shown in the ID column: its SharePoint ID, else its row number.
-const displayId = id => { const o = state.items.find(i => i.id === id), p = plan.rows.findIndex(x => x.id === id); return o ? (o.spId || String(p + 1)) : '?'; };
+const displayId = id => { const o = state.items.find(i => i.id === id), p = plan.rows.find(x => x.id === id); return o ? (o.spId || String(p ? p.rank : '?')) : '?'; };
 const itemOf = id => state.items.find(i => i.id === id);
 const pushUndo = () => { undoStack.push(JSON.stringify(state.items)); if (undoStack.length > 40) undoStack.shift(); };
 function undo() {
@@ -671,7 +695,7 @@ function parseCell(key, text, it) {
       const fromBuild = /\s*@build\b/i.test(tok), holdBuild = /\s*@hold\b/i.test(tok);
       const [ref, st] = tok.replace(/\s*@(build|hold)\b/gi, '').split(/\s*>\s*/), low = ref.trim().toLowerCase();
       let cand = state.items.find(o => o.spId && o.spId.toLowerCase() === low) || state.items.find(o => o.name.toLowerCase() === low);
-      if (!cand && /^\d+$/.test(low)) { const r = plan.rows[+low - 1], o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
+      if (!cand && /^\d+$/.test(low)) { const r = plan.rows.find(x => x.rank === +low), o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
       if (!cand) return { ok: false };
       let until = null;
       if (st) { until = matchStage(st); if (!until || until === TRIAGE || until === OOS) return { ok: false }; }
@@ -899,7 +923,7 @@ function leftRows(ui = true) {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
       const idText = displayId;
       const deps = (it.dependsOn || []);
-      return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || (i + 1), url: itemUrl(it), name: r.name, triage: r.triage,
+      return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || r.rank, url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '' }; }));
   return rows.map((r, i) => {
     const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—'), r.comments || ''];
@@ -911,7 +935,7 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || ''))}</title><rect x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f">${esc(clip(c[2], c[1] - 8))}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || '') + (ui ? ' Click to sort.' : ''))}</title><rect ${ui ? `data-gsort="${c[0]}" style="cursor:pointer" ` : ''}x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f" pointer-events="none">${esc(clip(c[2], c[1] - 18))}${gsort.key === c[0] ? (gsort.dir === 1 ? ' ▲' : ' ▼') : ''}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
   const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
@@ -1033,7 +1057,7 @@ function downloadCSV() {
   const q = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const idOf = id => { const i = state.items.find(x => x.id === id); return i ? (i.spId || i.name) : id; };
   const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On', 'Comments']]
-    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, i.url, (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; '), i.comments || '']));
+    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, itemUrl(i), (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; '), i.comments || '']));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }));
   a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
