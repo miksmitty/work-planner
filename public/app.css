@@ -215,6 +215,24 @@ td input[type=text] { min-width:110px; }
 input.comment { width:100%; min-width:120px; }
 
 th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
-th.sortable:hover { background:#eef1f5; }
+th.sortable:hover { background:var(--bg); }
 th.sortable.asc::after { content:" ▲"; font-size:10px; } th.sortable.desc::after { content:" ▼"; font-size:10px; }
-th.filt { padding:2px 4px; } th.filt input { width:100%; min-width:50px; box-sizing:border-box; font-weight:400; }
+
+th.sortable .fbtn { border:none; background:transparent; padding:0 3px; margin-left:4px; font-size:11px; color:var(--muted); cursor:pointer; }
+th.sortable .fbtn:hover { background:var(--line); }
+th.sortable.on .fbtn { color:#fff; background:#2f6fed; border-radius:3px; }
+.fpop { position:absolute; z-index:50; width:236px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.2); padding:8px; font-size:13px; font-weight:400; }
+.fpop > button { display:block; width:100%; text-align:left; border:none; background:transparent; padding:4px 6px; cursor:pointer; color:inherit; }
+.fpop > button:hover:not(:disabled) { background:#eef1f5; } .fpop > button:disabled { color:#9aa3ad; cursor:default; }
+.fpop hr { border:none; border-top:1px solid var(--line); margin:6px 0; }
+.fpop .fq { width:100%; box-sizing:border-box; margin-bottom:6px; }
+.fpop .flist { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:4px; padding:2px 0; margin:4px 0 8px; }
+.fpop label { display:flex; align-items:center; gap:6px; padding:2px 6px; cursor:pointer; } .fpop .flist label:hover { background:var(--bg); } .fpop .flist .muted { margin-left:auto; }
+.fpop .fact { display:flex; gap:8px; justify-content:flex-end; }
+
+.fpop .fact button { color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; }
+.fpop .fact .primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+#gantt [data-gfilter] { opacity:0; } #gantt .gh:hover [data-gfilter], #gantt [data-gfilter].on { opacity:1; }
+#gantt [data-gfilter]:hover rect { fill:#c9d6f5; } #gantt [data-gfilter].on rect[fill="#2f6fed"], #gantt [data-gfilter]:hover rect[fill="#2f6fed"] { fill:#2f6fed; }
+th.sortable .fbtn { opacity:0; } th.sortable:hover .fbtn, th.sortable.on .fbtn, th.sortable.asc .fbtn, th.sortable.desc .fbtn { opacity:1; }

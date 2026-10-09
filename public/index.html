@@ -37,12 +37,15 @@
     <div class="card gcard">
       <div class="toolbar">
         <span class="hint">Hatched = waiting (capacity, developers or a dependency) · grey arrows = dependencies · dotted tail = time to reach 80% confidence</span>
+        <span class="hint" id="gfiltmsg" style="color:#2f6fed;font-weight:600"></span>
+        <button id="gclear" class="ghost" type="button" hidden title="Remove every Gantt column filter">Clear filters</button>
         <span class="hint" id="gmsg" style="color:#2f6fed;font-weight:600"></span>
         <span class="grow"></span>
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
         <button id="fit" type="button" aria-pressed="true" title="Scale the chart to fill the window width. Moving the Zoom slider switches back to a fixed scale">Fit to width</button>
         <label class="hint" title="Pixels per day. Moving it turns off Fit to width">Zoom <input id="zoom" type="range" min="1" max="16" step="0.5" value="2"></label>
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
+        <button id="analysis" title="Download one shareable HTML report: summary, timeline, every setting and every use case with the values used">Export analysis</button>
         <button id="png" class="primary">Download PNG</button>
       </div>
       <div id="gantt"></div>
@@ -53,13 +56,14 @@
   <section class="panel" id="tab-cases" hidden>
     <div class="card">
       <div class="toolbar">
-        <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order. Click a column heading to sort (click again to reverse, a third time to restore); type in the boxes to filter.</span>
+        <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order. Click a column heading to sort (again to reverse, a third time to restore); use the ▾ on a heading to filter.</span>
         <span class="grow"></span>
         <button class="primary" id="add">+ Add</button>
         <button id="bulk">Bulk add…</button>
         <button id="export" title="Download the use cases as a CSV backup (can be re-imported with Import CSV)">Download CSV</button>
         <button id="import" title="Import use cases from a SharePoint list export (CSV)">Import CSV…</button>
         <span class="hint" id="importMsg"></span>
+        <button class="ghost" id="clearfilters" title="Clear every column filter" hidden>Clear filters</button>
         <button class="ghost" id="reset">Reset to test data</button>
       </div>
       <table>
@@ -75,7 +79,7 @@
           <th class="sortable" data-sort="end" title="Predicted finish date. ~ = tentative (still in Stakeholder Triage).">Planned finish</th>
           <th class="sortable" data-sort="p80" title="Date the use case is 80% likely to be finished by (Monte Carlo forecast).">80% confident</th>
           <th class="sortable" data-sort="comments" title="Free-text notes">Comments</th>
-          <th></th></tr><tr><th class="filt"></th><th class="filt"><input type="search" data-filter="id" placeholder="Filter" aria-label="Filter id"></th><th class="filt"><input type="search" data-filter="name" placeholder="Filter" aria-label="Filter name"></th><th class="filt"><input type="search" data-filter="stage" placeholder="Filter" aria-label="Filter stage"></th><th class="filt"><input type="search" data-filter="priority" placeholder="Filter" aria-label="Filter priority"></th><th class="filt"><input type="search" data-filter="complexity" placeholder="Filter" aria-label="Filter complexity"></th><th class="filt"><input type="search" data-filter="sme" placeholder="Filter" aria-label="Filter sme"></th><th class="filt"><input type="search" data-filter="reuse" placeholder="Filter" aria-label="Filter reuse"></th><th class="filt"><input type="search" data-filter="eng" placeholder="Filter" aria-label="Filter eng"></th><th class="filt"><input type="search" data-filter="end" placeholder="Filter" aria-label="Filter end"></th><th class="filt"><input type="search" data-filter="p80" placeholder="Filter" aria-label="Filter p80"></th><th class="filt"><input type="search" data-filter="comments" placeholder="Filter" aria-label="Filter comments"></th><th class="filt"><button class="ghost" id="clearfilters" title="Clear all filters">Clear</button></th></tr></thead>
+          <th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>

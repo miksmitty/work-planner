@@ -64,6 +64,8 @@ function bind() {
   const g = $('#gantt');
   g.addEventListener('click', e => {
     const c = e.target.closest && e.target.closest('[data-cmt]'); if (c) return editComment(c);
+    const gf = e.target.closest && e.target.closest('[data-gfilter]');
+    if (gf) { const k = gf.dataset.gfilter; if (fpop && fpop.dataset.k === 'g' + k) return closeFilter(); return openGanttFilter(k, gf.getBoundingClientRect()), fpop.dataset.k = 'g' + k; }
     const h = e.target.closest && e.target.closest('[data-gsort]'); if (!h) return;
     const k = h.dataset.gsort;
     if (gsort.key !== k) { gsort.key = k; gsort.dir = 1; } else if (gsort.dir === 1) gsort.dir = -1; else gsort.key = null;
@@ -96,7 +98,9 @@ function bind() {
   try { if (localStorage.getItem('todayLine') === '0') $('#today').checked = false; } catch {}
   $('#today').onchange = () => { try { localStorage.setItem('todayLine', $('#today').checked ? '1' : '0'); } catch {} renderGantt(); };
   $('#png').onclick = downloadPNG;
+  $('#analysis').onclick = exportAnalysis;
   $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; saveColW(); renderGantt(); };
+  $('#gclear').onclick = () => { Object.keys(gfilter).forEach(k => delete gfilter[k]); update(); };
   $('#setupexport').onclick = exportSetup;
   $('#setupimport').onclick = importSetup;
   $('#add').onclick = () => { state.items.push(newItem('New use case')); renderRows(); update(); };
@@ -320,9 +324,9 @@ function renderSizes() {
 }
 
 /* ---- use cases: simple row + optional details ---- */
-const view = { key: null, dir: 1, filters: {} };   // Use cases table: sort column/direction and per-column filter text
+const view = { key: null, dir: 1, filters: {} };   // Use cases table: sort column/direction; filters[col] = Set of allowed cell texts (absent = no filter)
 function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), sort: comparable value }
-  const r = plan && plan.rows.find(x => x.id === it.id), lab = (list, key) => (list.find(c => c.key === key) || {}).name || key || '';
+  const r = plan && plan.allRows.find(x => x.id === it.id), lab = (list, key) => (list.find(c => c.key === key) || {}).name || key || '';
   const eng = r && r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng'), f = fc && fc.rows[it.id];
   const d = (date, pre) => ({ text: date ? (pre || '') + fmt(date) : '', sort: date ? new Date(date).getTime() : null });
   switch (k) {
@@ -342,8 +346,8 @@ function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), 
 }
 function viewItems() {
   let list = Scheduler.orderItems(state).map((it, i) => ({ it, rank: i + 1 }));
-  const fs = Object.entries(view.filters).filter(([, v]) => v);
-  if (fs.length) list = list.filter(x => fs.every(([k, v]) => String(viewVal(x.it, x.rank, k).text).toLowerCase().includes(v.toLowerCase())));
+  const fs = Object.entries(view.filters);
+  if (fs.length) list = list.filter(x => fs.every(([k, set]) => set.has(String(viewVal(x.it, x.rank, k).text))));
   if (view.key) list.sort((a, b) => {
     const x = viewVal(a.it, a.rank, view.key).sort, y = viewVal(b.it, b.rank, view.key).sort;
     if (x == null || x === '' ) return (y == null || y === '') ? 0 : 1;   // blanks always last
@@ -357,11 +361,56 @@ document.querySelectorAll('th[data-sort]').forEach(th => th.onclick = () => {
   if (view.key !== k) { view.key = k; view.dir = 1; } else if (view.dir === 1) view.dir = -1; else view.key = null;
   renderRows();
 });
-document.querySelectorAll('input[data-filter]').forEach(i => i.oninput = () => { view.filters[i.dataset.filter] = i.value.trim(); renderRows(); });
-$('#clearfilters').onclick = () => { view.filters = {}; document.querySelectorAll('input[data-filter]').forEach(i => i.value = ''); renderRows(); };
+// Excel-style column filter: a ▾ on each heading opens a searchable checklist of that column's values
+let fpop = null;
+function closeFilter() { if (fpop) { fpop.remove(); fpop = null; } }
+// o = { rect, label, values: [every cell text], current: Set|undefined, sortDir: 1|-1|0 (active sort on this column), onSort(dir|0), onApply(Set|null) }
+function openFilterPop(o) {
+  closeFilter();
+  const counts = new Map(); o.values.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+  const vals = [...counts.keys()].sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  const chosen = new Set(o.current || vals);
+  fpop = document.createElement('div'); fpop.className = 'fpop';
+  fpop.innerHTML = `<button data-s="1">Sort A → Z</button><button data-s="-1">Sort Z → A</button><button data-s="0" ${o.sortDir ? '' : 'disabled'}>Clear sort</button><hr>
+    <input type="search" class="fq" placeholder="Search ${esc(o.label)}"><label class="fall"><input type="checkbox" class="fa"> (Select all)</label><div class="flist"></div>
+    <div class="fact"><button class="primary fok">OK</button><button class="fclr">Clear filter</button></div>`;
+  const list = fpop.querySelector('.flist'), q = fpop.querySelector('.fq'), fa = fpop.querySelector('.fa');
+  const shown = () => vals.filter(v => (v || '(Blanks)').toLowerCase().includes(q.value.trim().toLowerCase()));
+  const sync = () => { const sh = shown(); fa.checked = sh.length > 0 && sh.every(v => chosen.has(v)); fa.indeterminate = !fa.checked && sh.some(v => chosen.has(v)); };
+  const draw = () => {
+    list.innerHTML = shown().map(v => `<label><input type="checkbox" data-v="${esc(v)}" ${chosen.has(v) ? 'checked' : ''}> ${esc(v || '(Blanks)')} <span class="muted">${counts.get(v)}</span></label>`).join('') || '<div class="muted">No matches</div>';
+    sync();
+  };
+  q.oninput = draw;
+  fa.onchange = () => { shown().forEach(v => fa.checked ? chosen.add(v) : chosen.delete(v)); draw(); };
+  list.onchange = e => { const v = e.target.dataset.v; e.target.checked ? chosen.add(v) : chosen.delete(v); sync(); };
+  fpop.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { closeFilter(); o.onSort(Number(b.dataset.s)); });
+  fpop.querySelector('.fok').onclick = () => { closeFilter(); o.onApply(vals.every(v => chosen.has(v)) ? null : new Set(chosen)); };
+  fpop.querySelector('.fclr').onclick = () => { closeFilter(); o.onApply(null); };
+  document.body.appendChild(fpop);
+  const r = o.rect, z = pageZoom();
+  fpop.style.left = Math.max(4, Math.min(r.left / z, innerWidth / z - 250)) + 'px'; fpop.style.top = (r.bottom / z + 2) + 'px';
+  draw(); q.focus();
+}
+function openFilter(th) {   // Use cases table
+  const k = th.dataset.sort;
+  openFilterPop({ rect: th.getBoundingClientRect(), label: th.firstChild.textContent.trim(), values: Scheduler.orderItems(state).map((it, i) => String(viewVal(it, i + 1, k).text)),
+    current: view.filters[k], sortDir: view.key === k ? view.dir : 0,
+    onSort: d => { if (d) { view.key = k; view.dir = d; } else view.key = null; renderRows(); },
+    onApply: set => { set ? view.filters[k] = set : delete view.filters[k]; renderRows(); } });
+}
+document.querySelectorAll('th[data-sort]').forEach(th => {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'fbtn'; b.title = 'Filter this column'; b.textContent = '▾';
+  b.onclick = e => { e.stopPropagation(); fpop && fpop.dataset.k === th.dataset.sort ? closeFilter() : (openFilter(th), fpop.dataset.k = th.dataset.sort); };
+  th.appendChild(b);
+});
+document.addEventListener('mousedown', e => { if (fpop && !fpop.contains(e.target) && !e.target.closest('.fbtn, [data-gfilter]')) closeFilter(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFilter(); });
+$('#clearfilters').onclick = () => { view.filters = {}; renderRows(); };
 function renderRows() {
   const tb = $('#rows'); tb.innerHTML = '';
-  document.querySelectorAll('th[data-sort]').forEach(th => { th.classList.toggle('asc', th.dataset.sort === view.key && view.dir === 1); th.classList.toggle('desc', th.dataset.sort === view.key && view.dir === -1); });
+  $('#clearfilters').hidden = !Object.keys(view.filters).length;
+  document.querySelectorAll('th[data-sort]').forEach(th => { th.classList.toggle('on', !!view.filters[th.dataset.sort]); th.classList.toggle('asc', th.dataset.sort === view.key && view.dir === 1); th.classList.toggle('desc', th.dataset.sort === view.key && view.dir === -1); });
   viewItems().forEach(({ it, rank: i1 }) => { const i = i1 - 1;
     const tr = document.createElement('tr'); tr.dataset.id = it.id; tr.classList.toggle('oos', it.stage === OOS);
     const opts = state.config.complexities.map(c => `<option value="${c.key}" ${c.key === it.complexity ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
@@ -632,8 +681,21 @@ function importSetup() {
   };
   inp.click();
 }
+function openGanttFilter(k, rect) {
+  openFilterPop({ rect, label: cols().find(c => c[0] === k)[2], values: plan.allCells.map(r => gcellText(r, k)), current: gfilter[k], sortDir: gsort.key === k ? gsort.dir : 0,
+    onSort: d => { if (d) { gsort.key = k; gsort.dir = d; } else gsort.key = null; update(); },
+    onApply: set => { set ? gfilter[k] = set : delete gfilter[k]; update(); } });
+}
 /* ---- Gantt sort: click a column heading; reorders plan.rows (every Gantt row lookup goes through that array) ---- */
 const gsort = { key: null, dir: 1 };
+const gfilter = {};   // Gantt column filters: key -> Set of allowed cell texts. Filtered rows are dropped from plan.rows (plan.allRows keeps every row for totals and the table)
+const gcellText = (r, k) => k === 'name' ? String(r.name) : String(r.vals[cols().findIndex(c => c[0] === k)]);
+function filterGantt() {
+  const fs = Object.entries(gfilter); plan.allCells = leftRows(false).slice(1);
+  if (!fs.length) return;
+  const keep = plan.allCells.map(r => fs.every(([k, set]) => set.has(gcellText(r, k))));
+  plan.rows = plan.rows.filter((r, i) => keep[i]);
+}
 function sortGantt() {
   if (!gsort.key) return;
   const k = gsort.key, rows = leftRows(false).slice(1), pos = new Map(plan.rows.map((r, i) => [r, i]));
@@ -651,17 +713,19 @@ function sortGantt() {
 function update() {
   plan = Scheduler.schedule(state);
   fc = plan.unscheduled ? null : Scheduler.forecast(state);
+  plan.allRows = plan.rows;
   plan.rows.forEach((r, i) => r.rank = i + 1);   // default-order number, so the numbers shown for items without an ID don't change when the Gantt is sorted
   sortGantt();
+  filterGantt();
   const hasEng = state.config.stages.some(s => s.kind === 'eng');
-  const inScope = plan.rows.length - plan.oos;
+  const inScope = plan.allRows.length - plan.oos;
   $('#summary').innerHTML = hasEng && inScope && plan.unscheduled === inScope
     ? `<span class="warn">No developers — engineering can't be scheduled</span>`
     : `<b>${inScope}</b> use cases${plan.oos ? ` <span class="muted">(+${plan.oos} out of scope)</span>` : ''} · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
       (fc ? ` · <span title="Monte Carlo: ${fc.iterations} simulated runs sampling effort between best and worst case">50%: <b>${fmt(fc.p50.date)}</b> · 80%: <b>${fmt(fc.p80.date)}</b> · 90%: <b>${fmt(fc.p90.date)}</b></span>` : '') +
       (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the delivery clock has not started. These are predicted assuming triage takes its estimated weeks (Setup tab), so their dates are tentative.">${plan.triage} in triage (tentative)</span>` : '') +
       (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '');
-  plan.rows.forEach(r => {
+  plan.allRows.forEach(r => {
     const tr = document.querySelector(`tr[data-id="${r.id}"]`); if (!tr) return;
     const e = r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng');
     tr.querySelector('[data-c=eng]').textContent = e ? `${fmt(e.startDate)} → ${fmt(e.endDate)}` + (r.queueWeeks > 0 ? ` · queued ${wk(r.queueWeeks)}w` : '') : '—';
@@ -674,6 +738,7 @@ function update() {
     tr.querySelector('[data-c=end]').textContent = r.endDate ? (r.triage ? '~' : '') + fmt(r.endDate) : '—';
     const f = fc && fc.rows[r.id]; tr.querySelector('[data-c=p80]').textContent = f ? fmt(f.p80Date) : '—';
   });
+  { const n = Object.keys(gfilter).length; $('#gclear').hidden = !n; $('#gfiltmsg').textContent = n ? `Filtered: showing ${plan.rows.length} of ${plan.allRows.length}` : ''; }
   renderGantt();
   clearTimeout(saveTimer);
   if (noSave) { $('#saved').textContent = 'Not saving: saved data failed to load'; return; }
@@ -696,7 +761,7 @@ let fillPrev = null;     // { p0, p1 } rows previewed while dragging the fill ha
 const undoStack = [];
 const rowPos = id => plan.rows.findIndex(r => r.id === id);
 // How a use case is shown in the ID column: its SharePoint ID, else its row number.
-const displayId = id => { const o = state.items.find(i => i.id === id), p = plan.rows.find(x => x.id === id); return o ? (o.spId || String(p ? p.rank : '?')) : '?'; };
+const displayId = id => { const o = state.items.find(i => i.id === id), p = plan.allRows.find(x => x.id === id); return o ? (o.spId || String(p ? p.rank : '?')) : '?'; };
 const itemOf = id => state.items.find(i => i.id === id);
 const pushUndo = () => { undoStack.push(JSON.stringify(state.items)); if (undoStack.length > 40) undoStack.shift(); };
 function undo() {
@@ -726,7 +791,7 @@ function parseCell(key, text, it) {
       const fromBuild = /\s*@build\b/i.test(tok), holdBuild = /\s*@hold\b/i.test(tok);
       const [ref, st] = tok.replace(/\s*@(build|hold)\b/gi, '').split(/\s*>\s*/), low = ref.trim().toLowerCase();
       let cand = state.items.find(o => o.spId && o.spId.toLowerCase() === low) || state.items.find(o => o.name.toLowerCase() === low);
-      if (!cand && /^\d+$/.test(low)) { const r = plan.rows.find(x => x.rank === +low), o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
+      if (!cand && /^\d+$/.test(low)) { const r = plan.allRows.find(x => x.rank === +low), o = r && state.items.find(i => i.id === r.id); if (o && !o.spId) cand = o; }
       if (!cand) return { ok: false };
       let until = null;
       if (st) { until = matchStage(st); if (!until || until === TRIAGE || until === OOS) return { ok: false }; }
@@ -887,7 +952,7 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 40, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88, cmt: 220 };
+const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 54, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88, cmt: 220 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -966,7 +1031,7 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<g><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || '') + (ui ? ' Click to sort.' : ''))}</title><rect ${ui ? `data-gsort="${c[0]}" style="cursor:pointer" ` : ''}x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f" pointer-events="none">${esc(clip(c[2], c[1] - 18))}${gsort.key === c[0] ? (gsort.dir === 1 ? ' ▲' : ' ▼') : ''}</text></g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); o += `<g class="gh"><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || '') + (ui ? ' Click to sort.' : ''))}</title><rect ${ui ? `data-gsort="${c[0]}" style="cursor:pointer" ` : ''}x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f" pointer-events="none">${esc(clip(c[2], c[1] - (gfilter[c[0]] || gsort.key === c[0] ? 30 : 10)))}${gsort.key === c[0] ? (gsort.dir === 1 ? ' ▲' : ' ▼') : ''}</text>${ui ? `<g data-gfilter="${c[0]}" class="${gfilter[c[0]] || gsort.key === c[0] ? 'on' : ''}" style="cursor:pointer"><title>Filter ${esc(c[2])}</title><rect x="${x + c[1] - 22}" y="${HH / 2 + 3}" width="18" height="${HH / 2 - 6}" rx="3" fill="${gfilter[c[0]] ? '#2f6fed' : 'transparent'}"/><text x="${x + c[1] - 13}" y="${HH / 2 + 15}" font-size="10" text-anchor="middle" fill="${gfilter[c[0]] ? '#fff' : '#5f6b7a'}" pointer-events="none">▾</text></g>` : ''}</g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
   const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
@@ -1094,6 +1159,97 @@ function downloadCSV() {
   a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
+
+/* ---- Export analysis: one self-contained HTML report (summary, timeline, every use case with the values used, settings by category) ---- */
+function exportAnalysis() {
+  const c = state.config, stages = c.stages, stName = id => id === TRIAGE ? 'Stakeholder Triage' : id === OOS ? 'Out of scope' : (stages.find(x => x.id === id) || {}).name || '';
+  const cxName = k => (c.complexities.find(x => x.key === k) || {}).name || '';
+  const lvl = { H: 'High', M: 'Medium', L: 'Low' }, byId = Object.fromEntries(state.items.map(i => [i.id, i]));
+  const d = x => x ? shortDate(x) : '';
+  const dash = '<span class="na">–</span>';
+  const td = (v, cls) => `<td${cls ? ` class="${cls}"` : ''}>${v === '' || v == null ? dash : v}</td>`;
+  const th = (v, cls) => `<th${cls ? ` class="${cls}"` : ''}>${esc(v)}</th>`;
+  const all = plan.allRows, rowOf = Object.fromEntries(all.map(r => [r.id, r]));
+  const eng = r => r.bars.find(b => b.type === 'stage' && stages[b.stageIdx]?.kind === 'eng');
+  const label = (it, r) => (it.spId || (r && r.rank) || '') + ' · ' + it.name;
+
+  // Timeline: bars at true size (12px text), labelled with ID and name only. Always every use case in default order.
+  const keep = plan.rows; let svg = '';
+  try {
+    plan.rows = all;
+    const L = layout(lw() + 1000), LW = 250, W = LW + L.width, H = L.height + 34, ord = Scheduler.orderItems(state);
+    let left = `<rect width="${LW}" height="${H}" fill="#fff"/><rect width="${LW}" height="${HH}" fill="#e9edf3"/><text x="8" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f">Use case</text>` +
+      `<text x="8" y="${HH + RH / 2 + 4}" font-size="12" font-weight="700" fill="#1c2430">Programme</text><line x1="0" x2="${LW}" y1="${HH + RH}" y2="${HH + RH}" stroke="#e8eaed"/>`;
+    ord.forEach((it, i) => { const y = HH + (i + 1) * RH; left += `<text x="8" y="${y + RH / 2 + 4}" font-size="12" fill="${it.stage === OOS ? '#8a94a3' : '#1c2430'}">${esc(clip(label(it, rowOf[it.id]), LW - 12))}</text><line x1="0" x2="${LW}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`; });
+    left += `<line x1="${LW}" x2="${LW}" y1="0" y2="${L.height}" stroke="#d5dae1"/>`;
+    let lg = '', x = 10; legendItems().forEach(i => { lg += `<rect x="${x}" y="${L.height + 12}" width="10" height="10" rx="2" fill="${i.c}"/><text x="${x + 15}" y="${L.height + 21}" font-size="12" fill="#33404f">${esc(i.t)}</text>`; x += 15 + i.t.length * 6.2 + 18; });
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">${SVG_DEFS}<rect width="${W}" height="${H}" fill="#fff"/>${left}<g transform="translate(${LW},0)">${rightSVG(L)}</g>${lg}</svg>`;
+  } finally { plan.rows = keep; }
+
+  // Use cases: what was entered | the values the planner used | the forecast
+  const depText = it => (it.dependsOn || []).map(x => { const o = byId[x.id]; return esc(o ? label(o, rowOf[o.id]) : '(missing)') + (x.until ? ` (until ${esc(stName(x.until))} is done)` : '') + (x.fromBuild ? ' (then starts at Build)' : '') + (x.holdBuild ? ' (only Build waits)' : ''); }).join('; ');
+  const overrides = it => { const o = [];
+    Object.entries(it.overrides || {}).forEach(([k, w]) => { if (w != null && w !== '') o.push(`${esc(stName(k))} fixed at ${wk(w)} wks`); });
+    if (it.effortOverride != null && it.effortOverride !== '') o.push(`effort fixed at ${wk(it.effortOverride)} dev-wks`);
+    if (it.teamCap != null && it.teamCap !== '') o.push(`max ${it.teamCap} developers`);
+    if (it.earliestStart) o.push(`not before ${d(it.earliestStart)}`);
+    if (it.stageStart) o.push(`in stage since ${d(it.stageStart)}`);
+    if (it.triageWeeks != null && it.triageWeeks !== '') o.push(`triage ${wk(it.triageWeeks)} wks`);
+    return o.join('; '); };
+  const note = (k, v) => v ? `<div class="sub2"><b>${k}</b> ${v}</div>` : '';
+  const rows = Scheduler.orderItems(state).map((it, i) => {
+    const r = rowOf[it.id] || {}, e = r.bars && eng(r), f = fc && fc.rows[it.id], url = itemUrl(it);
+    const smeF = it.sme ? c.smeFactors[it.sme] : null, reF = it.reuse ? c.reuseFactors[it.reuse] : (it.buildsOn ? c.reuseFactors.M : null);
+    const base = r.effortBase != null ? wk(r.effortBase) : '', used = r.effort != null ? `<b>${wk(r.effort)}</b>` : '';
+    const finish = r.endDate ? (r.triage ? '~' : '') + d(r.endDate) : (it.stage === OOS ? 'Out of scope' : '');
+    return `<tr${it.stage === OOS ? ' class="oos"' : ''}>${td(i + 1, 'n')}<td class="name"><b>${esc(it.name)}</b>${url ? ` <a href="${esc(url)}">${esc(it.spId || 'link')} ↗</a>` : it.spId ? ` <span class="id">${esc(it.spId)}</span>` : ''}` +
+      note('Depends on', depText(it)) + note('Overrides', overrides(it)) + note('Comment', esc(it.comments || '')) + '</td>' +
+      td(esc(stName(it.stage))) + td(it.priority ?? '', 'n') + td(esc(cxName(it.complexity))) + td(it.sme ? `${lvl[it.sme]} (×${smeF})` : '') + td(it.reuse ? `${lvl[it.reuse]} (×${reF})${r.reusePending ? ' – pending' : ''}` : '') +
+      td(base, 'n') + td(used, 'n') + td(e ? `${d(e.startDate)} → ${d(e.endDate)}${r.queueWeeks > 0 ? `<div class="sub2">waits ${wk(r.queueWeeks)} wks for developers</div>` : ''}` : '') + td(finish, 'n') + td(f ? d(f.p80Date) : '', 'n') + '</tr>';
+  });
+  const useCases = `<table class="uc"><thead><tr class="grp"><th></th><th></th><th colspan="5" class="g1">What you entered</th><th colspan="2" class="g2">Build effort (dev-wks)</th><th colspan="3" class="g3">Forecast</th></tr>
+    <tr>${th('#', 'n')}${th('Use case')}${th('Stage')}${th('Priority', 'n')}${th('Complexity')}${th('SME required')}${th('Reuse')}${th('From complexity', 'n')}${th('Used (after Reuse)', 'n')}${th('Build dates')}${th('Planned finish', 'n')}${th('80% confident', 'n')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+
+  // Settings: four equal cards
+  const kv = (k, v, n) => `<tr>${th(k)}<td>${v}${n ? `<div class="sub2">${esc(n)}</div>` : ''}</td></tr>`;
+  const general = `<table class="kv"><tbody>${kv('Developers', c.devResources, 'Shared engineering pool')}${kv('Max per use case', c.defaultTeamCap, 'Most developers on one use case')}${kv('Max in flight', c.wipLimit || 'none', 'Most use cases in progress at once')}${kv('Team overhead', Math.round((c.teamOverhead || 0) * 100) + '%', 'Throughput lost per extra developer')}${kv('Start date', d(c.startDate))}${kv('Triage estimate', wk(c.triageWeeks) + ' wks', 'Default Stakeholder Triage length')}${kv('SharePoint base URL', esc(c.spLinkBase || '') || dash)}</tbody></table>`;
+  const stageTbl = `<table><thead><tr>${th('#', 'n')}${th('Stage')}${th('Length', 'n')}${th('SME applies')}${th('Reuse applies')}</tr></thead><tbody>${stages.map((st, i) => `<tr>${td(i + 1, 'n')}${td(esc(st.name))}${td(st.kind === 'eng' ? 'from size' : wk(st.weeks) + ' wks', 'n')}${td(st.sme ? 'Yes' : 'No')}${td(st.reuse ? 'Yes' : 'No')}</tr>`).join('')}</tbody></table>`;
+  const sizeTbl = `<table><thead><tr>${th('Complexity')}${th('Best', 'n')}${th('Likely', 'n')}${th('Worst', 'n')}${th('Expected', 'n')}</tr></thead><tbody>${c.complexities.map(x => `<tr>${td(esc(x.name))}${td(x.min, 'n')}${td(x.effort, 'n')}${td(x.max, 'n')}${td(wk(Scheduler.pertMean(x)), 'n')}</tr>`).join('')}</tbody></table><div class="sub2">Developer-weeks of Build effort. Expected = (best + 4 × likely + worst) ÷ 6.</div>`;
+  const facTbl = `<table><thead><tr>${th('Level')}${th('SME required', 'n')}${th('Reuse', 'n')}</tr></thead><tbody>${['H', 'M', 'L'].map(k => `<tr>${td(lvl[k])}${td('×' + c.smeFactors[k], 'n')}${td('×' + c.reuseFactors[k], 'n')}</tr>`).join('')}</tbody></table>
+    <div class="sub2">SME multiplies the length of: ${stages.filter(s => s.sme).map(s => esc(s.name)).join(', ') || 'no stages'}.<br>Reuse multiplies the effort of: ${stages.filter(s => s.reuse).map(s => esc(s.name)).join(', ') || 'no stages'}.</div>`;
+
+  const inScope = all.length - plan.oos, hasFc = !!fc, when = new Date().toISOString().slice(0, 10);
+  const kpi = (k, v) => `<div class="kpi"><div class="v">${v}</div><div class="k">${esc(k)}</div></div>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Work plan analysis ${when}</title><style>
+  :root{--text:#1c2430;--muted:#5f6b7a;--line:#dfe3e8;--bg:#f6f7f9;--accent:#2f6fed}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  main{max-width:1400px;margin:0 auto;padding:28px 20px 56px}
+  h1{font-size:24px;margin:0 0 2px} h2{font-size:16px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)} h3{font-size:13px;margin:0 0 8px}
+  .lead{color:var(--muted);margin:0 0 16px} .sub2{color:var(--muted);font-size:12px;margin-top:2px} .na{color:#b3bac4}
+  .kpis{display:flex;flex-wrap:wrap;gap:10px} .kpi{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 16px;min-width:140px} .kpi .v{font-size:18px;font-weight:700} .kpi .k{color:var(--muted);font-size:12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:12px;align-items:start}
+  table{border-collapse:collapse;width:100%;font-size:12px} th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top} thead th{background:#eef1f5;font-weight:600;white-space:nowrap}
+  .n{text-align:right;font-variant-numeric:tabular-nums} table.kv th{background:none;font-weight:600;width:140px;white-space:normal} table.kv td{vertical-align:top;overflow-wrap:anywhere} .grid thead th{white-space:normal}
+  .uc .grp th{background:none;border-bottom:2px solid var(--line);text-align:center;color:var(--muted);font-size:12px;padding-bottom:2px} .uc .g1{border-left:1px solid var(--line)} .uc .g2,.uc .g3{border-left:1px solid var(--line)}
+  .uc td.name{min-width:260px} .uc tbody tr:nth-child(even){background:#fafbfc} tr.oos td{color:#8a94a3} .id{color:var(--muted)} a{color:var(--accent);text-decoration:none}
+  .foot{color:var(--muted);font-size:12px;margin-top:20px} svg{display:block;max-width:100%;height:auto}
+  @media print{body{background:#fff} main{padding:0} h2{break-after:avoid} tr{break-inside:avoid} .card{border:none;padding:0}} @page{size:A3 landscape;margin:12mm}
+  </style></head><body><main>
+  <h1>Work plan analysis</h1><p class="lead">Generated ${when} · ${inScope} use cases${plan.oos ? ` (+${plan.oos} out of scope)` : ''} · ${c.devResources} developers · starts ${d(c.startDate)}</p>
+  <div class="kpis">${kpi('Planned finish', d(plan.endDate))}${kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${plan.triage ? kpi('In triage (tentative)', plan.triage) : ''}${plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : ''}</div>
+  <h2>Timeline</h2><div class="card">${svg}</div>
+  <h2>Use cases</h2><div class="card">${useCases}</div>
+  <p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>
+  <h2>Settings</h2><div class="grid"><div class="card"><h3>General</h3>${general}</div><div class="card"><h3>Stages</h3>${stageTbl}</div><div class="card"><h3>Engineering size by complexity</h3>${sizeTbl}</div><div class="card"><h3>SME required and Reuse factors</h3>${facTbl}</div></div>
+  <script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: state.items }).replace(/</g, '\\u003c')}</script>
+  </main></body></html>`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  a.download = `work-planner-analysis-${when}.html`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return html;
+}
+
 function downloadPNG() {
   const L = layout(1800), TH = 34, LG = 30, W = lw() + L.width, H = TH + L.height + LG;
   const title = `Work plan · ${state.config.devResources} developers · planned finish ${shortDate(plan.endDate)}` +
@@ -1134,7 +1290,7 @@ function ganttHover(id) {
   if (!info) { info = document.createElement('div'); info.id = 'chaininfo'; info.className = 'hint'; $('#legend').insertAdjacentElement('afterend', info); }
   if (!id) { info.textContent = 'Hover a row to see what it waits on and what waits on it.'; return; }
   const { up, down } = chainOf(id), all = new Set([id, ...up, ...down]);
-  const name = x => (plan.rows.find(r => r.id === x) || {}).name || x;
+  const name = x => (plan.allRows.find(r => r.id === x) || {}).name || x;
   const tint = x => x === id ? 'rgba(47,111,237,.14)' : up.has(x) ? 'rgba(224,138,0,.18)' : 'rgba(124,58,237,.14)';
   svgs.forEach(svg => {
     if (!svg.closest('.gscroll')) return;
