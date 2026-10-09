@@ -292,4 +292,17 @@ delete old.config.stages;
 old.items.forEach(i => { delete i.stage; delete i.priority; });
 assert.strictEqual(schedule(old).unscheduled, 0);
 assert.ok(old.items.every(i => i.stage === 'd'));
+// Required-by status: after / tight / ok / none
+{ const Scheduler = require('./public/scheduler.js'), ds = Scheduler.dueStatus;
+  assert.strictEqual(ds(null, '2027-01-01', null), null);
+  assert.strictEqual(ds('2027-01-10', null, null).kind, 'none');
+  assert.deepStrictEqual(ds('2027-01-10', '2027-01-01', '2027-01-08'), { kind: 'ok', days: 9, p80Days: 2 });
+  assert.strictEqual(ds('2027-01-10', '2027-01-10', '2027-01-10').kind, 'ok');          // on the day is fine
+  assert.strictEqual(ds('2027-01-10', '2027-01-05', '2027-01-12').kind, 'tight');        // planned meets it, 80% date doesn't
+  assert.strictEqual(ds('2027-01-10', '2027-01-11', '2027-01-20').kind, 'after');
+  assert.strictEqual(ds('2027-01-10', '2027-01-05', null).kind, 'ok');                  // no forecast = judged on the plan alone
+  const st = Scheduler.normalize({ config: Scheduler.defaultState().config, items: [{ id: 'a', name: 'a', dueDate: '15-Mar-2027', complexity: 'low', stage: 'ideation' }, { id: 'b', name: 'b', dueDate: '2027-03-15', complexity: 'low', stage: 'ideation' }] });
+  assert.strictEqual(st.items[0].dueDate, null); assert.strictEqual(st.items[1].dueDate, '2027-03-15');   // only ISO dates are kept
+}
+
 console.log('all tests passed');

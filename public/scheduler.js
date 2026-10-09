@@ -124,6 +124,7 @@
       if (typeof it.comments !== 'string') it.comments = '';
       if (it.priority === undefined || it.priority === '') it.priority = null;
       if (it.stageStart === undefined) it.stageStart = null;
+      if (typeof it.dueDate !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(it.dueDate)) it.dueDate = null;   // required-by date
       if (it.triageWeeks === undefined || it.triageWeeks === '') it.triageWeeks = null;
       if (!['H', 'M', 'L'].includes(it.sme)) it.sme = null;
       if (!['H', 'M', 'L'].includes(it.reuse)) it.reuse = null;
@@ -413,7 +414,15 @@
     return { p50: summary(.5), p80: summary(.8), p90: summary(.9), rows: rowsOut, iterations };
   }
 
-  const api = { schedule, forecast, defaultState, normalize, orderItems, stageRank, pertMean, parseDate, fmtDate, addWeeks, TRIAGE, OOS };
+  // Required-by status from ISO dates: after (planned finish after the date), tight (planned finish meets it but the 80% date does not), ok, none (no forecast).
+  function dueStatus(due, planned, p80) {
+    if (!due) return null;
+    if (!planned) return { kind: 'none', days: null, p80Days: null };
+    const days = Math.round((Date.parse(due) - Date.parse(planned)) / 86400000), p80Days = p80 ? Math.round((Date.parse(due) - Date.parse(p80)) / 86400000) : null;
+    return { kind: days < 0 ? 'after' : (p80Days != null && p80Days < 0 ? 'tight' : 'ok'), days, p80Days };
+  }
+
+  const api = { dueStatus, schedule, forecast, defaultState, normalize, orderItems, stageRank, pertMean, parseDate, fmtDate, addWeeks, TRIAGE, OOS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Scheduler = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -25,6 +25,20 @@ function bindDate(el, get, onValue) {
   };
 }
 const wk = n => Math.round(n * 10) / 10;
+// Required-by status for a use case (null when it has no date). Detail words are for tooltips and the report.
+const DUE = { ok: { label: 'On track', fg: '#1a7f37', mid: '#2e9b50' }, tight: { label: 'Tight', fg: '#8a6500', mid: '#c99a00' }, after: { label: 'After date', fg: '#b4501e', mid: '#e0762f' }, none: { label: 'No forecast', fg: '#6b7686', mid: '#8d99aa' } };
+function dueInfo(it) {
+  if (!it.dueDate || !plan || !plan.byId) return null;
+  const r = plan.byId[it.id], f = fc && fc.rows[it.id];
+  const st = Scheduler.dueStatus(it.dueDate, it.stage === OOS || !r ? null : r.endDate, f && f.p80Date); if (!st) return null;
+  const n = x => Math.abs(x) + (Math.abs(x) === 1 ? ' day' : ' days');
+  let detail = st.kind === 'after' ? `forecast finish is ${n(st.days)} after the required date` : st.kind === 'tight' ? `planned finish is ${n(st.days)} before, but the 80% date is ${n(st.p80Days)} after` : st.kind === 'ok' ? `${st.days === 0 ? 'finishes on the date' : n(st.days) + ' to spare'}${st.p80Days != null ? `, 80% date ${st.p80Days >= 0 ? n(st.p80Days) + ' before' : n(st.p80Days) + ' after'}` : ''}` : 'no forecast finish';
+  if (st.kind === 'after' || st.kind === 'tight') {   // flag, never move: name predecessors that already finish after the date
+    const blockers = (it.dependsOn || []).map(d => ({ o: state.items.find(x => x.id === d.id), r: plan.byId[d.id], f: fc && fc.rows[d.id] })).filter(x => x.o && x.r && x.r.endDate && (st.kind === 'after' ? x.r.endDate > it.dueDate : (x.f && x.f.p80Date > it.dueDate)));
+    if (blockers.length) detail += ` · because of ${blockers.map(x => x.o.name).join(', ')}`;
+  }
+  return { ...st, ...DUE[st.kind], detail };
+}
 const num = v => v === '' || v == null ? null : Number(v);
 const color = i => `var(--s${i % 8})`;
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -64,6 +78,7 @@ function bind() {
   const g = $('#gantt');
   g.addEventListener('click', e => {
     const c = e.target.closest && e.target.closest('[data-cmt]'); if (c) return editComment(c);
+    const dc = e.target.closest && e.target.closest('[data-duecell]'); if (dc) return editDue(dc);
     const gf = e.target.closest && e.target.closest('[data-gfilter]');
     if (gf) { const k = gf.dataset.gfilter; if (fpop && fpop.dataset.k === 'g' + k) return closeFilter(); return openGanttFilter(k, gf.getBoundingClientRect()), fpop.dataset.k = 'g' + k; }
     const h = e.target.closest && e.target.closest('[data-gsort]'); if (!h) return;
@@ -183,6 +198,22 @@ function editComment(rect) {
   inp.onblur = () => finish(true);
   box.appendChild(inp); inp.focus(); inp.select();
 }
+function editDue(rect) {
+  document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
+  const it = state.items.find(x => x.id === rect.dataset.id); if (!it) return;
+  const box = $('.gleft'), br = box.getBoundingClientRect(), rr = rect.getBoundingClientRect(), zf = Number(document.body.style.zoom) || 1;
+  const inp = document.createElement('input'); inp.type = 'date'; inp.className = 'cxpick'; inp.value = it.dueDate || '';
+  inp.style.cssText = `left:${(rr.left - br.left) / zf}px;top:${(rr.top - br.top) / zf}px;width:${Math.max(rr.width, 130) / zf}px;height:${rr.height / zf}px`;
+  let done = false;
+  const finish = save => { if (done) return; done = true; inp.onblur = null; const iso = inp.value || null;
+    if (inp.parentNode) inp.parentNode.removeChild(inp);
+    if (save && iso !== it.dueDate) { pushUndo(); it.dueDate = iso; renderRows(); update(); }
+    $('#gantt').focus({ preventScroll: true }); };
+  inp.onchange = () => finish(true);   // picking a date commits straight away
+  inp.onkeydown = e => { if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); e.stopPropagation(); };
+  inp.onblur = () => finish(true);
+  box.appendChild(inp); inp.focus(); try { inp.showPicker(); } catch {}
+}
 function pickField(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id), kind = rect.dataset.pick; if (!it) return;
@@ -237,7 +268,7 @@ const stageOptions = sel => `<option value="${TRIAGE}" ${sel === TRIAGE ? 'selec
   state.config.stages.map((s, i) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${i + 1}. ${esc(s.name)}</option>`).join('') +
   `<option value="${OOS}" ${sel === OOS ? 'selected' : ''}>Out of scope</option>`;
 const newItem = name => ({ id: uid('uc'), name, complexity: state.config.complexities[1]?.key || state.config.complexities[0].key,
-  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], teamCap: null, effortOverride: null, earliestStart: null, comments: '', overrides: {} });
+  stage: state.config.stages[0]?.id, priority: null, stageStart: null, sme: null, reuse: null, buildsOn: null, dependsOn: [], teamCap: null, effortOverride: null, earliestStart: null, dueDate: null, comments: '', overrides: {} });
 
 /* ---- stages: one ordered list of editable chips ---- */
 function renderStages() {
@@ -326,7 +357,7 @@ function renderSizes() {
 /* ---- use cases: simple row + optional details ---- */
 const view = { key: null, dir: 1, filters: {} };   // Use cases table: sort column/direction; filters[col] = Set of allowed cell texts (absent = no filter)
 function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), sort: comparable value }
-  const r = plan && plan.allRows.find(x => x.id === it.id), lab = (list, key) => (list.find(c => c.key === key) || {}).name || key || '';
+  const r = plan && plan.byId && plan.byId[it.id], lab = (list, key) => (list.find(c => c.key === key) || {}).name || key || '';
   const eng = r && r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng'), f = fc && fc.rows[it.id];
   const d = (date, pre) => ({ text: date ? (pre || '') + fmt(date) : '', sort: date ? new Date(date).getTime() : null });
   switch (k) {
@@ -341,6 +372,8 @@ function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), 
     case 'eng': return eng ? d(eng.startDate) : { text: '', sort: null };
     case 'end': return r ? d(r.endDate, r.triage ? '~' : '') : { text: '', sort: null };
     case 'p80': return f ? d(f.p80Date) : { text: '', sort: null };
+    case 'due': return { text: it.dueDate ? fmt(it.dueDate) : '', sort: it.dueDate || null };
+    case 'status': { const x = dueInfo(it); return { text: x ? x.label : '', sort: x ? ['after', 'tight', 'ok', 'none'].indexOf(x.kind) : null }; }
     case 'comments': return { text: it.comments || '', sort: it.comments || '' };
   }
 }
@@ -424,6 +457,7 @@ function renderRows() {
       <td><select data-f="sme" title="SME required: how much subject-matter-expert time this use case needs">${smeOptions(it.sme)}</select></td>
       <td><select data-f="reuse" title="Reuse: how much of the plumbing already exists">${reuseOptions(it.reuse)}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
+      <td><input type="date" class="dateinp" data-due value="${esc(it.dueDate || '')}" title="Required-by date. Blank = no deadline"></td><td class="calc" data-c="status"></td>
       <td><input type="text" data-f="comments" class="comment" placeholder="Comments" value="${esc(it.comments || '')}"></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
@@ -437,6 +471,7 @@ function renderRows() {
         renderRows(); update();
       };
     });
+    tr.querySelector('[data-due]').onchange = e => { pushUndo(); it.dueDate = e.target.value || null; update(); };
     tr.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
       const a = b.dataset.a, j = state.items.indexOf(it);
       if (a === 'details') { open.has(it.id) ? open.delete(it.id) : open.add(it.id); }
@@ -467,7 +502,7 @@ function renderDeps(box, it) {
 function detailsRow(it) {
   const tr = document.createElement('tr'); tr.className = 'details';
   const fixed = state.config.stages.filter(s => s.kind !== 'eng');
-  tr.innerHTML = `<td></td><td colspan="12"><div class="dgrid">
+  tr.innerHTML = `<td></td><td colspan="14"><div class="dgrid">
     <label title="Free-text notes about this use case (shown as a tooltip on the timeline)" style="flex-basis:100%">Comments <textarea data-t="comments" rows="2" style="width:100%">${esc(it.comments ?? '')}</textarea></label>
     <label title="ID of the item in the SharePoint list">SharePoint ID <input type="text" data-t="spId" value="${esc(it.spId ?? '')}"></label>
     <label title="Link to the SharePoint list item (http/https)">URL <input type="text" data-t="url" style="width:280px" placeholder="https://…" value="${esc(it.url ?? '')}"></label>
@@ -519,6 +554,7 @@ const GUESS = {
   reuse: /reus/i,
   dep: /depend|predecess|prereq|blocked ?by/i,
   comments: /comment|note|remark/i,
+  due: /^(required ?by|due( ?date)?|need(ed)? ?by|deadline|target ?date)$/i,
 };
 function matchComplexity(val) {
   const cxs = state.config.complexities, v = String(val || '').trim().toLowerCase();
@@ -562,7 +598,7 @@ function openImport() {
 }
 function planImport(rows, map, prefix, mode) {
   const head = rows[0], col = k => map[k] === '' ? -1 : head.indexOf(map[k]);
-  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse'), dep: col('dep'), comments: col('comments') };
+  const ci = { id: col('id'), name: col('name'), cx: col('complexity'), url: col('url'), stage: col('stage'), pri: col('priority'), sme: col('sme'), reuse: col('reuse'), dep: col('dep'), comments: col('comments'), due: col('due') };
   const out = { items: [], adds: 0, updates: 0, skipped: 0, unmatched: new Set(), unmatchedStage: new Set() };
   const seen = new Set();
   rows.slice(1).forEach(r => {
@@ -578,7 +614,7 @@ function planImport(rows, map, prefix, mode) {
     const sme = ci.sme >= 0 ? parseSme(g(ci.sme)) : null;
     const reuse = ci.reuse >= 0 ? parseSme(g(ci.reuse)) : null;   // H / M / L, same wording
     const existing = mode === 'update' && spId && state.items.find(i => i.spId === spId);
-    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing, dep: ci.dep >= 0 ? g(ci.dep) : null, comments: ci.comments >= 0 ? String(r[ci.comments] ?? '').trim() : '' });
+    out.items.push({ spId, name: name || ('Use case ' + spId), url, cx, stage, priority, sme, reuse, existing, due: ci.due >= 0 ? parseDateText(g(ci.due)) || (/^\d{4}-\d\d-\d\d/.test(g(ci.due)) ? g(ci.due).slice(0, 10) : null) : null, dep: ci.dep >= 0 ? g(ci.dep) : null, comments: ci.comments >= 0 ? String(r[ci.comments] ?? '').trim() : '' });
     existing ? out.updates++ : out.adds++;
   });
   return out;
@@ -600,6 +636,7 @@ function showImport(rows, fileName) {
       <label title="A number (1 = highest) or High / Medium / Low">Priority</label><select data-m="priority">${opts(guess('priority'))}</select>
       <label title="How much of the needed plumbing already exists: High / Medium / Low (or H / M / L)">Reuse</label><select data-m="reuse">${opts(guess('reuse'))}</select>
       <label title="How much SME time the use case needs: High / Medium / Low (or H / M / L)">SME required</label><select data-m="sme">${opts(guess('sme'))}</select>
+      <label title="Date the use case is needed by. Blank = no deadline">Required by</label><select data-m="due">${opts(guess('due'))}</select>
       <label title="Free-text notes for each use case">Comments</label><select data-m="comments">${opts(guess('comments'))}</select>
       <label title="Predecessors: SharePoint IDs (or names) separated by ; or ,. Optional >Stage = until that stage completes, then @build (start at Build) or @hold (only Build waits). Matches what Download CSV writes.">Depends on</label><select data-m="dep">${opts(guess('dep'))}</select>
       <label title="Used for any row with no URL: this text + the item's ID (or put {id} where the ID goes)">Base URL</label>
@@ -634,9 +671,9 @@ function showImport(rows, fileName) {
     const applied = [];
     const own = i => (i.url && i.url !== resolveBase(prefix || state.config.spLinkBase, i.spId)) ? i.url : null;   // a link that is just base URL + ID stays derived
     p.items.forEach(i => {
-      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (own(i)) i.existing.url = own(i); if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; if (i.comments) i.existing.comments = i.comments; return; }
+      if (i.existing) { applied.push([i, i.existing]); i.existing.name = i.name; if (own(i)) i.existing.url = own(i); if (i.cx) i.existing.complexity = i.cx; if (i.stage) i.existing.stage = i.stage; if (i.priority != null) i.existing.priority = i.priority; if (i.sme) i.existing.sme = i.sme; if (i.reuse) i.existing.reuse = i.reuse; if (i.comments) i.existing.comments = i.comments; if (i.due) i.existing.dueDate = i.due; return; }
       state.items.push({ id: uid('uc'), spId: i.spId || null, name: i.name, url: own(i), complexity: i.cx || dflt, stage: i.stage || state.config.stages[0]?.id, priority: i.priority ?? null, sme: i.sme || null, reuse: i.reuse || null, buildsOn: null, stageStart: null,
-        teamCap: null, effortOverride: null, earliestStart: null, comments: i.comments || '', overrides: {} });
+        teamCap: null, effortOverride: null, earliestStart: null, dueDate: i.due || null, comments: i.comments || '', overrides: {} });
       applied.push([i, state.items[state.items.length - 1]]);
     });
     // Dependencies last, once every imported use case exists so rows can refer to each other
@@ -700,7 +737,7 @@ function sortGantt() {
   if (!gsort.key) return;
   const k = gsort.key, rows = leftRows(false).slice(1), pos = new Map(plan.rows.map((r, i) => [r, i]));
   const val = i => { const r = rows[i]; let v = ({ id: r.id, name: r.name, stage: r.stage, pri: r.pri, cx: r.cx, sme: ['Low', 'Medium', 'High'].indexOf(r.sme), reuse: ['Low', 'Medium', 'High'].indexOf(r.reuse),
-    dep: r.dep, dur: r.dur, start: r.start, end: r.end, cmt: r.comments })[k]; if (v instanceof Date) v = v.getTime(); return v === '' || v === undefined || v === null || v === -1 ? null : v; };
+    dep: r.dep, dur: r.dur, start: r.start, end: r.end, due: r.due, status: r.di ? ['after', 'tight', 'ok', 'none'].indexOf(r.di.kind) : null, cmt: r.comments })[k]; if (v instanceof Date) v = v.getTime(); return v === '' || v === undefined || v === null || v === -1 ? null : v; };
   const keyed = plan.rows.map((r, i) => ({ r, v: val(i), i }));
   keyed.sort((a, b) => {
     if (a.v == null || b.v == null) return a.v == null ? (b.v == null ? a.i - b.i : 1) : -1;   // blanks last
@@ -709,11 +746,15 @@ function sortGantt() {
   });
   plan.rows = keyed.map(x => x.r);
 }
+function dueSummary() {
+  const c = { after: 0, tight: 0 }; state.items.forEach(it => { const x = dueInfo(it); if (x && c[x.kind] != null) c[x.kind]++; });
+  return (c.after ? ` · <span style="color:${DUE.after.mid};font-weight:600" title="Use cases forecast to finish after their required-by date">${c.after} after required date</span>` : '') + (c.tight ? ` · <span style="color:${DUE.tight.mid};font-weight:600" title="Planned finish meets the required-by date but the 80% date does not">${c.tight} tight</span>` : '');
+}
 /* ---- recompute + draw ---- */
 function update() {
   plan = Scheduler.schedule(state);
   fc = plan.unscheduled ? null : Scheduler.forecast(state);
-  plan.allRows = plan.rows;
+  plan.allRows = plan.rows; plan.byId = Object.fromEntries(plan.rows.map(r => [r.id, r]));
   plan.rows.forEach((r, i) => r.rank = i + 1);   // default-order number, so the numbers shown for items without an ID don't change when the Gantt is sorted
   sortGantt();
   filterGantt();
@@ -724,7 +765,7 @@ function update() {
     : `<b>${inScope}</b> use cases${plan.oos ? ` <span class="muted">(+${plan.oos} out of scope)</span>` : ''} · <b>${Math.round(plan.totalEffort)}</b> dev-weeks · planned finish <b>${fmt(plan.endDate)}</b> <span class="muted">(${wk(plan.totalWeeks)} wks)</span>` +
       (fc ? ` · <span title="Monte Carlo: ${fc.iterations} simulated runs sampling effort between best and worst case">50%: <b>${fmt(fc.p50.date)}</b> · 80%: <b>${fmt(fc.p80.date)}</b> · 90%: <b>${fmt(fc.p90.date)}</b></span>` : '') +
       (plan.triage ? ` · <span class="muted" title="Stakeholder Triage: the delivery clock has not started. These are predicted assuming triage takes its estimated weeks (Setup tab), so their dates are tentative.">${plan.triage} in triage (tentative)</span>` : '') +
-      (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '');
+      (plan.unscheduled ? ` · <span class="warn">${plan.unscheduled} unscheduled</span>` : '') + dueSummary();
   plan.allRows.forEach(r => {
     const tr = document.querySelector(`tr[data-id="${r.id}"]`); if (!tr) return;
     const e = r.bars.find(b => b.type === 'stage' && state.config.stages[b.stageIdx]?.kind === 'eng');
@@ -737,6 +778,7 @@ function update() {
       if (r.depIssue) { td.textContent += ' · dependency ignored (circular)'; td.title = 'This use case is part of a circular dependency, so its dependencies are ignored'; } }
     tr.querySelector('[data-c=end]').textContent = r.endDate ? (r.triage ? '~' : '') + fmt(r.endDate) : '—';
     const f = fc && fc.rows[r.id]; tr.querySelector('[data-c=p80]').textContent = f ? fmt(f.p80Date) : '—';
+    { const di = dueInfo(state.items.find(x => x.id === r.id) || {}), sc = tr.querySelector('[data-c=status]'); sc.textContent = di ? di.label : ''; sc.style.color = di ? di.mid : ''; sc.style.fontWeight = di ? '600' : ''; sc.title = di ? di.detail : ''; }
   });
   { const n = Object.keys(gfilter).length; $('#gclear').hidden = !n; $('#gfiltmsg').textContent = n ? `Filtered: showing ${plan.rows.length} of ${plan.allRows.length}` : ''; }
   renderGantt();
@@ -949,10 +991,12 @@ const COLHELP = {
   start: 'Predicted date work starts (the first stage after any triage period). ~ marks a tentative date for a use case still in Stakeholder Triage.',
   end: 'Predicted finish date at the end of the last stage. ~ marks a tentative date for a use case still in Stakeholder Triage.',
   eng: 'Predicted Build dates. "queued" = waiting for a free developer; "reuse saves" = dev-weeks saved by reuse; "reuse pending" = it builds on a use case whose Build is not finished yet.',
+  due: 'Required-by date: when the use case is needed. Click a cell to pick a date; clear it to remove the deadline. A flag marks it on the timeline.',
+  status: 'On track = planned finish and 80% date are on or before the required date. Tight = planned finish meets it but the 80% date does not. After date = planned finish is after it. Hover a cell for the detail.',
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 206, stage: 154, pri: 54, cx: 84, sme: 54, reuse: 50, dep: 150, dur: 66, start: 88, end: 88, cmt: 220 };
+const DEF_COLW = { id: 56, name: 190, stage: 130, pri: 54, cx: 84, sme: 54, reuse: 50, dep: 130, dur: 62, start: 84, end: 84, due: 84, status: 80, cmt: 160 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
   let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
@@ -964,7 +1008,7 @@ function loadColW() {
 let COLW = loadColW();
 const saveColW = () => lsSet('colW', JSON.stringify(COLW));
 const cols = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
-  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish'], ['cmt', COLW.cmt, 'Comments']];
+  ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish'], ['due', COLW.due, 'Required by'], ['status', COLW.status, 'Status'], ['cmt', COLW.cmt, 'Comments']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -1020,9 +1064,9 @@ function leftRows(ui = true) {
       const idText = displayId;
       const deps = (it.dependsOn || []);
       return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || r.rank, url: itemUrl(it), name: r.name, triage: r.triage,
-        dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '' }; }));
+        dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '', due: it.dueDate || null, di: dueInfo(it) }; }));
   return rows.map((r, i) => {
-    const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—'), r.comments || ''];
+    const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—'), r.due ? fmt(r.due) : '', r.di ? r.di.label : '', r.comments || ''];
     if (ui && i > 0) { if (vals[2]) vals[2] += ' ▾'; if (vals[4]) vals[4] += ' ▾'; vals[5] = (vals[5] || '–') + ' ▾'; vals[6] = (vals[6] || '–') + ' ▾'; vals[7] = (vals[7] || '–') + ' ▾'; }
     return { ...r, vals };
   });
@@ -1045,14 +1089,16 @@ function leftSVG(L, ui = true) {
     r.vals.forEach((v, k) => {
       const linked = r.url && k < 2 && v !== '';
       const dim = (r.triage && k === 2) || r.oos;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="13" fill="${linked ? '#0b57d0' : dim ? '#8a94a3' : '#1c2430'}" ${w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="13" fill="${linked ? '#0b57d0' : k === 12 && r.di ? r.di.fg : dim ? '#8a94a3' : '#1c2430'}" ${k === 12 && r.di ? 'font-weight="700" ' : w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
       if (r.comments && k === 1) { o += `<g><title>${esc(r.comments)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`; }
-      o += linked ? `<a href="${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
+      if (k === 12 && r.di) o += `<g><title>${esc(r.di.label + ': ' + r.di.detail)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`;
+      o += linked ? `<a href=""${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
     });
     if (ui && i > 0) {   // one hit target per editable cell: select / drag-select / edit
       const hit = (kind, k) => `<rect data-cell data-ci="${k}" data-p="${i - 1}" data-id="${esc(r.itemId)}" data-pick="${kind}" x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent" style="cursor:pointer"><title>Click to change · drag to select a range (then Ctrl/Cmd+C, Ctrl/Cmd+V) · shift-click extends</title></rect>`;
       o += hit('stage', 2) + hit('pri', 3) + hit('cx', 4) + hit('sme', 5) + hit('reuse', 6) + hit('dep', 7)
-        + `<rect data-cmt data-id="${esc(r.itemId)}" x="${xs[11]}" y="${y}" width="${cs[11][1]}" height="${RH}" fill="transparent" style="cursor:text"><title>${esc(r.comments || 'Click to add a comment')}</title></rect>`;
+        + `<rect data-duecell data-id="${esc(r.itemId)}" x="${xs[11]}" y="${y}" width="${cs[11][1]}" height="${RH}" fill="transparent" style="cursor:text"><title>Click to pick the required-by date</title></rect>`
+        + `<rect data-cmt data-id="${esc(r.itemId)}" x="${xs[13]}" y="${y}" width="${cs[13][1]}" height="${RH}" fill="transparent" style="cursor:text"><title>${esc(r.comments || 'Click to add a comment')}</title></rect>`;
     }
   });
   if (selPos.length) {   // outline + fill handle
@@ -1113,6 +1159,12 @@ function rightSVG(L) {
       const x1 = L.XW(r.end), x2 = L.XW(f.p80), my = y + RH / 2;
       o += `<g data-r="${esc(r.id)}"><title>${esc(r.name)}: 80% likely done by ${esc(shortDate(f.p80Date))}</title><line x1="${x1}" x2="${x2}" y1="${my}" y2="${my}" stroke="#5f6b7a" stroke-dasharray="2 2"/><line x1="${x2}" x2="${x2}" y1="${my - 4}" y2="${my + 4}" stroke="#5f6b7a"/></g>`;
     }
+    const it = state.items.find(x => x.id === r.id), di = it && dueInfo(it);   // required-by flag, coloured by status
+    if (di) {
+      const ms = Date.parse(it.dueDate);
+      if (ms >= L.t0 && ms <= L.t1) { const x = L.X(ms), cy = y + RH / 2;
+        o += `<g data-r="${esc(r.id)}"><title>${esc(r.name)} — required by ${esc(shortDate(it.dueDate))}: ${esc(di.label + ', ' + di.detail)}</title><line x1="${x}" x2="${x}" y1="${y + 2}" y2="${y + RH - 2}" stroke="${di.mid}" stroke-width="2"/><polygon points="${x},${cy - 6} ${x + 6},${cy} ${x},${cy + 6} ${x - 6},${cy}" fill="${di.mid}" stroke="#fff" stroke-width="1.2"/></g>`; }
+    }
   });
   // dependency arrows (predecessor's completion point -> successor's start)
   (plan.links || []).forEach(l => {
@@ -1144,7 +1196,7 @@ function renderGantt() {
 }
 function legendItems() {
   return [...state.config.stages.map((s, i) => ({ c: pal(i), t: s.name })),
-    { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }];
+    { c: '#e6e9ee', t: 'Stakeholder Triage (estimated, tentative)' }, { c: '#b3bac4', t: 'Waiting (capacity / developers)' }, { c: '#5f6b7a', t: '80% confidence tail' }, { c: '#2e9b50', t: '◆ Required by (green on track · amber tight · orange after date)' }];
 }
 
 function downloadCSV() {
@@ -1152,8 +1204,8 @@ function downloadCSV() {
   const stName = k => k === OOS ? 'Out of scope' : (state.config.stages.find(x => x.id === k) || {}).name || '';
   const q = v => { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const idOf = id => { const i = state.items.find(x => x.id === id); return i ? (i.spId || i.name) : id; };
-  const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On', 'Comments']]
-    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, itemUrl(i), (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; '), i.comments || '']));
+  const rows = [['ID', 'Title', 'Stage', 'Priority', 'Complexity', 'SME Required', 'Reuse', 'Item URL', 'Depends On', 'Required By', 'Comments']]
+    .concat(state.items.map(i => [i.spId, i.name, stName(i.stage), i.priority, cxName(i.complexity), i.sme, i.reuse, itemUrl(i), (i.dependsOn || []).map(d => idOf(d.id) + (d.until ? '>' + stName(d.until) : '') + (d.fromBuild ? ' @build' : '') + (d.holdBuild ? ' @hold' : '')).join('; '), i.dueDate || '', i.comments || '']));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\r\n')], { type: 'text/csv' }));
   a.download = `work-planner-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
@@ -1162,6 +1214,8 @@ function downloadCSV() {
 
 /* ---- Export analysis: one self-contained HTML report (summary, timeline, every use case with the values used, settings by category) ---- */
 function exportAnalysis() {
+  const dueKpis = () => { const c = { after: 0, tight: 0, ok: 0 }; let n = 0; state.items.forEach(it => { const x = dueInfo(it); if (x) { n++; if (c[x.kind] != null) c[x.kind]++; } });
+    return n ? `<div class="kpi"><div class="v"><span class="st st-after">${c.after}</span> after date · <span class="st st-tight">${c.tight}</span> tight · <span class="st st-ok">${c.ok}</span> on track</div><div class="k">${n} use cases with a required-by date</div></div>` : ''; };
   const c = state.config, stages = c.stages, stName = id => id === TRIAGE ? 'Stakeholder Triage' : id === OOS ? 'Out of scope' : (stages.find(x => x.id === id) || {}).name || '';
   const cxName = k => (c.complexities.find(x => x.key === k) || {}).name || '';
   const lvl = { H: 'High', M: 'Medium', L: 'Low' }, byId = Object.fromEntries(state.items.map(i => [i.id, i]));
@@ -1201,14 +1255,15 @@ function exportAnalysis() {
     const r = rowOf[it.id] || {}, e = r.bars && eng(r), f = fc && fc.rows[it.id], url = itemUrl(it);
     const smeF = it.sme ? c.smeFactors[it.sme] : null, reF = it.reuse ? c.reuseFactors[it.reuse] : (it.buildsOn ? c.reuseFactors.M : null);
     const base = r.effortBase != null ? wk(r.effortBase) : '', used = r.effort != null ? `<b>${wk(r.effort)}</b>` : '';
+    const di = dueInfo(it);
     const finish = r.endDate ? (r.triage ? '~' : '') + d(r.endDate) : (it.stage === OOS ? 'Out of scope' : '');
     return `<tr${it.stage === OOS ? ' class="oos"' : ''}>${td(i + 1, 'n')}<td class="name"><b>${esc(it.name)}</b>${url ? ` <a href="${esc(url)}">${esc(it.spId || 'link')} ↗</a>` : it.spId ? ` <span class="id">${esc(it.spId)}</span>` : ''}` +
       note('Depends on', depText(it)) + note('Overrides', overrides(it)) + note('Comment', esc(it.comments || '')) + '</td>' +
       td(esc(stName(it.stage))) + td(it.priority ?? '', 'n') + td(esc(cxName(it.complexity))) + td(it.sme ? `${lvl[it.sme]} (×${smeF})` : '') + td(it.reuse ? `${lvl[it.reuse]} (×${reF})${r.reusePending ? ' – pending' : ''}` : '') +
-      td(base, 'n') + td(used, 'n') + td(e ? `${d(e.startDate)} → ${d(e.endDate)}${r.queueWeeks > 0 ? `<div class="sub2">waits ${wk(r.queueWeeks)} wks for developers</div>` : ''}` : '') + td(finish, 'n') + td(f ? d(f.p80Date) : '', 'n') + '</tr>';
+      td(base, 'n') + td(used, 'n') + td(e ? `${d(e.startDate)} → ${d(e.endDate)}${r.queueWeeks > 0 ? `<div class="sub2">waits ${wk(r.queueWeeks)} wks for developers</div>` : ''}` : '') + td(finish, 'n') + td(f ? d(f.p80Date) : '', 'n') + td(it.dueDate ? d(it.dueDate) : '', 'n') + td(di ? `<span class="st st-${di.kind}">${di.label}</span><div class="sub2">${esc(di.detail)}</div>` : '') + '</tr>';
   });
-  const useCases = `<table class="uc"><thead><tr class="grp"><th></th><th></th><th colspan="5" class="g1">What you entered</th><th colspan="2" class="g2">Build effort (dev-wks)</th><th colspan="3" class="g3">Forecast</th></tr>
-    <tr>${th('#', 'n')}${th('Use case')}${th('Stage')}${th('Priority', 'n')}${th('Complexity')}${th('SME required')}${th('Reuse')}${th('From complexity', 'n')}${th('Used (after Reuse)', 'n')}${th('Build dates')}${th('Planned finish', 'n')}${th('80% confident', 'n')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  const useCases = `<table class="uc"><thead><tr class="grp"><th></th><th></th><th colspan="5" class="g1">What you entered</th><th colspan="2" class="g2">Build effort (dev-wks)</th><th colspan="3" class="g3">Forecast</th><th colspan="2" class="g3">Required by</th></tr>
+    <tr>${th('#', 'n')}${th('Use case')}${th('Stage')}${th('Priority', 'n')}${th('Complexity')}${th('SME required')}${th('Reuse')}${th('From complexity', 'n')}${th('Used (after Reuse)', 'n')}${th('Build dates')}${th('Planned finish', 'n')}${th('80% confident', 'n')}${th('Date', 'n')}${th('Status')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
 
   // Settings: four equal cards
   const kv = (k, v, n) => `<tr>${th(k)}<td>${v}${n ? `<div class="sub2">${esc(n)}</div>` : ''}</td></tr>`;
@@ -1232,15 +1287,16 @@ function exportAnalysis() {
   table{border-collapse:collapse;width:100%;font-size:12px} th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top} thead th{background:#eef1f5;font-weight:600;white-space:nowrap}
   .n{text-align:right;font-variant-numeric:tabular-nums} table.kv th{background:none;font-weight:600;width:140px;white-space:normal} table.kv td{vertical-align:top;overflow-wrap:anywhere} .grid thead th{white-space:normal}
   .uc .grp th{background:none;border-bottom:2px solid var(--line);text-align:center;color:var(--muted);font-size:12px;padding-bottom:2px} .uc .g1{border-left:1px solid var(--line)} .uc .g2,.uc .g3{border-left:1px solid var(--line)}
-  .uc td.name{min-width:260px} .uc tbody tr:nth-child(even){background:#fafbfc} tr.oos td{color:#8a94a3} .id{color:var(--muted)} a{color:var(--accent);text-decoration:none}
+  .uc td.n{white-space:nowrap} .uc td:last-child{min-width:170px} .uc td.name{min-width:260px} .uc tbody tr:nth-child(even){background:#fafbfc} tr.oos td{color:#8a94a3} .id{color:var(--muted)} a{color:var(--accent);text-decoration:none}
+  .st{font-weight:700} .st-ok{color:#1a7f37} .st-tight{color:#8a6500} .st-after{color:#b4501e} .st-none{color:#6b7686}
   .foot{color:var(--muted);font-size:12px;margin-top:20px} svg{display:block;max-width:100%;height:auto}
   @media print{body{background:#fff} main{padding:0} h2{break-after:avoid} tr{break-inside:avoid} .card{border:none;padding:0}} @page{size:A3 landscape;margin:12mm}
   </style></head><body><main>
   <h1>Work plan analysis</h1><p class="lead">Generated ${when} · ${inScope} use cases${plan.oos ? ` (+${plan.oos} out of scope)` : ''} · ${c.devResources} developers · starts ${d(c.startDate)}</p>
-  <div class="kpis">${kpi('Planned finish', d(plan.endDate))}${kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${plan.triage ? kpi('In triage (tentative)', plan.triage) : ''}${plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : ''}</div>
+  <div class="kpis">${kpi('Planned finish', d(plan.endDate))}${kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${plan.triage ? kpi('In triage (tentative)', plan.triage) : ''}${plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : ''}${dueKpis()}</div>
   <h2>Timeline</h2><div class="card">${svg}</div>
   <h2>Use cases</h2><div class="card">${useCases}</div>
-  <p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>
+  <p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>Required by</b>: “After date” = planned finish is after the date; “Tight” = planned finish meets it but the 80% confident date does not. <b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>
   <h2>Settings</h2><div class="grid"><div class="card"><h3>General</h3>${general}</div><div class="card"><h3>Stages</h3>${stageTbl}</div><div class="card"><h3>Engineering size by complexity</h3>${sizeTbl}</div><div class="card"><h3>SME required and Reuse factors</h3>${facTbl}</div></div>
   <script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: state.items }).replace(/</g, '\\u003c')}</script>
   </main></body></html>`;

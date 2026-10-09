@@ -236,3 +236,7 @@ th.sortable.on .fbtn { color:#fff; background:#2f6fed; border-radius:3px; }
 #gantt [data-gfilter] { opacity:0; } #gantt .gh:hover [data-gfilter], #gantt [data-gfilter].on { opacity:1; }
 #gantt [data-gfilter]:hover rect { fill:#c9d6f5; } #gantt [data-gfilter].on rect[fill="#2f6fed"], #gantt [data-gfilter]:hover rect[fill="#2f6fed"] { fill:#2f6fed; }
 th.sortable .fbtn { opacity:0; } th.sortable:hover .fbtn, th.sortable.on .fbtn, th.sortable.asc .fbtn, th.sortable.desc .fbtn { opacity:1; }
+
+/* the chart keeps a usable minimum width; when the table plus chart is wider than the window the Gantt scrolls sideways */
+#gantt { overflow-x:auto; }
+.gscroll { min-width:420px; }

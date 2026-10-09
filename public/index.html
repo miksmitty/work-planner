@@ -78,6 +78,8 @@
           <th class="sortable" data-sort="eng" title="Predicted Build dates. 'queued' = waiting for a free developer; 'reuse saves' = dev-weeks saved; 'reuse pending' = builds on a use case not yet built.">Engineering</th>
           <th class="sortable" data-sort="end" title="Predicted finish date. ~ = tentative (still in Stakeholder Triage).">Planned finish</th>
           <th class="sortable" data-sort="p80" title="Date the use case is 80% likely to be finished by (Monte Carlo forecast).">80% confident</th>
+          <th class="sortable" data-sort="due" title="Date the use case is needed by. Type dd-mmm-yyyy; blank = no deadline">Required by</th>
+          <th class="sortable" data-sort="status" title="On track: the planned finish and 80% date are on or before the required date. Tight: the planned finish meets it but the 80% date does not. After date: the planned finish is after the required date (a prompt to talk, not a failure).">Status</th>
           <th class="sortable" data-sort="comments" title="Free-text notes">Comments</th>
           <th></th></tr></thead>
         <tbody id="rows"></tbody>
