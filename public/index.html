@@ -44,6 +44,7 @@
         <label class="hint" title="Draw a red line at today's date (also in the PNG)"><input type="checkbox" id="today" checked> Today line</label>
         <button id="fit" type="button" aria-pressed="true" title="Scale the chart to fill the window width. Moving the Zoom slider switches back to a fixed scale">Fit to width</button>
         <label class="hint" title="Pixels per day. Moving it turns off Fit to width">Zoom <input id="zoom" type="range" min="1" max="16" step="0.5" value="2"></label>
+        <button id="colsbtn" class="ghost" type="button" title="Choose which Gantt columns to show">Columns ▾</button>
         <button id="resetcols" class="ghost" title="Restore the default column widths">Reset columns</button>
         <button id="analysis" title="Download one shareable HTML report: summary, timeline, every setting and every use case with the values used">Export analysis</button>
         <button id="png" class="primary">Download PNG</button>
@@ -58,6 +59,7 @@
       <div class="toolbar">
         <span class="hint">Sorted by most advanced stage first, then priority (1 = highest). Developers are handed out in this order. Click a column heading to sort (again to reverse, a third time to restore); use the ▾ on a heading to filter.</span>
         <span class="grow"></span>
+        <label class="hint" title="Show long comments in full, growing the row height, instead of one clipped line"><input type="checkbox" id="wrapCmt"> Wrap comments</label>
         <button class="primary" id="add">+ Add</button>
         <button id="bulk">Bulk add…</button>
         <button id="export" title="Download the use cases as a CSV backup (can be re-imported with Import CSV)">Download CSV</button>

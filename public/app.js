@@ -111,10 +111,27 @@ function bind() {
   showTab(lsGet('tab') || 'timeline');
   window.addEventListener('resize', () => { if (activeTab === 'timeline') renderGantt(); });
   try { if (localStorage.getItem('todayLine') === '0') $('#today').checked = false; } catch {}
+  try { if (localStorage.getItem('wrapCmt') === '1') $('#wrapCmt').checked = true; } catch {}
+  document.body.classList.toggle('wrapcmt', $('#wrapCmt').checked);
+  $('#wrapCmt').onchange = () => { try { localStorage.setItem('wrapCmt', $('#wrapCmt').checked ? '1' : '0'); } catch {} document.body.classList.toggle('wrapcmt', $('#wrapCmt').checked); fitComments(); };
   $('#today').onchange = () => { try { localStorage.setItem('todayLine', $('#today').checked ? '1' : '0'); } catch {} renderGantt(); };
   $('#png').onclick = downloadPNG;
   $('#analysis').onclick = exportAnalysis;
-  $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; saveColW(); renderGantt(); };
+  $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; HIDDEN.clear(); saveColW(); saveHidden(); renderGantt(); };
+  $('#colsbtn').onclick = e => {   // checklist of Gantt columns; the task name always stays
+    e.stopPropagation(); const old = document.getElementById('colpop'); if (old) { old.remove(); return; }
+    const pop = document.createElement('div'); pop.id = 'colpop';
+    pop.style.cssText = 'position:fixed;z-index:50;background:#fff;border:1px solid #c9ced6;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:8px 12px;color:#1c2430;display:flex;flex-direction:column;gap:4px;font-size:13px';
+    COLS_RAW().filter(c => c[0] !== 'name').forEach(c => {
+      const l = document.createElement('label'), cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !HIDDEN.has(c[0]);
+      cb.onchange = () => { cb.checked ? HIDDEN.delete(c[0]) : HIDDEN.add(c[0]); saveHidden(); renderGantt(); };
+      l.append(cb, ' ' + c[2]); pop.appendChild(l);
+    });
+    const r = e.currentTarget.getBoundingClientRect(); pop.style.left = r.left + 'px'; pop.style.top = r.bottom + 4 + 'px';
+    document.body.appendChild(pop);
+    const off = ev => { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('mousedown', off); } };
+    setTimeout(() => document.addEventListener('mousedown', off));
+  };
   $('#gclear').onclick = () => { Object.keys(gfilter).forEach(k => delete gfilter[k]); update(); };
   $('#setupexport').onclick = exportSetup;
   $('#setupimport').onclick = importSetup;
@@ -183,6 +200,8 @@ function pickDeps(rect) {
   pop.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); close(true); } });
   pop.querySelector('.dp-filter').focus();
 }
+function fitComment(t) { t.style.height = 'auto'; if (document.body.classList.contains('wrapcmt')) t.style.height = t.scrollHeight + 'px'; else t.style.height = ''; }
+function fitComments() { document.querySelectorAll('textarea.comment').forEach(fitComment); }
 function editComment(rect) {
   document.querySelectorAll('.cxpick').forEach(x => { x.onblur = null; if (x.parentNode) x.parentNode.removeChild(x); });
   const it = state.items.find(x => x.id === rect.dataset.id); if (!it) return;
@@ -367,8 +386,8 @@ function viewVal(it, rank, k) {   // { text: what the cell shows (filtered on), 
     case 'stage': { const st = state.config.stages.find(s => s.id === it.stage); return { text: st ? st.name : String(it.stage || ''), sort: Math.max(0, state.config.stages.findIndex(s => s.id === it.stage)) }; }
     case 'priority': return { text: it.priority ?? '', sort: it.priority ?? null };
     case 'complexity': return { text: lab(state.config.complexities, it.complexity), sort: lab(state.config.complexities, it.complexity) };
-    case 'sme': return { text: it.sme || '', sort: ['Low', 'Medium', 'High'].indexOf(it.sme) };
-    case 'reuse': return { text: it.reuse || '', sort: ['Low', 'Medium', 'High'].indexOf(it.reuse) };
+    case 'sme': return { text: SME_LABEL[it.sme] || '', sort: ['Low', 'Medium', 'High'].indexOf(it.sme) };
+    case 'reuse': return { text: SME_LABEL[it.reuse] || '', sort: ['Low', 'Medium', 'High'].indexOf(it.reuse) };
     case 'eng': return eng ? d(eng.startDate) : { text: '', sort: null };
     case 'end': return r ? d(r.endDate, r.triage ? '~' : '') : { text: '', sort: null };
     case 'p80': return f ? d(f.p80Date) : { text: '', sort: null };
@@ -458,14 +477,14 @@ function renderRows() {
       <td><select data-f="reuse" title="Reuse: how much of the plumbing already exists">${reuseOptions(it.reuse)}</select></td>
       <td class="calc" data-c="eng"></td><td class="calc" data-c="end"></td><td class="calc" data-c="p80"></td>
       <td><input type="date" class="dateinp" data-due value="${esc(it.dueDate || '')}" title="Required-by date. Blank = no deadline"></td><td class="calc" data-c="status"></td>
-      <td><input type="text" data-f="comments" class="comment" placeholder="Comments" value="${esc(it.comments || '')}"></td>
+      <td><textarea data-f="comments" class="comment" rows="1" placeholder="Comments" title="${esc(it.comments || '')}">${esc(it.comments || '')}</textarea></td>
       <td style="white-space:nowrap">
         <button class="ghost" data-a="details" title="Overrides">${open.has(it.id) ? '▾' : '▸'} details</button>
         <button class="ghost" data-a="del" title="Delete">✕</button>
       </td>`;
     tr.querySelectorAll('[data-f]').forEach(el => {
       const f = el.dataset.f;
-      if (f === 'name' || f === 'comments') el.oninput = () => { it[f] = el.value; update(); };
+      if (f === 'name' || f === 'comments') el.oninput = () => { it[f] = el.value; if (f === 'comments') fitComment(el); update(); };
       else el.onchange = () => {   // stage / priority change the sort order, so redraw the (re-sorted) list
         it[f] = f === 'priority' ? num(el.value) : (f === 'sme' || f === 'reuse' ? (el.value || null) : el.value);
         renderRows(); update();
@@ -481,6 +500,7 @@ function renderRows() {
     tb.appendChild(tr);
     if (open.has(it.id)) tb.appendChild(detailsRow(it));
   });
+  fitComments();
 }
 // Dependencies: finish-to-start links. "Until" = the predecessor's finish, or completion of one of its stages.
 function renderDeps(box, it) {
@@ -517,7 +537,7 @@ function detailsRow(it) {
   renderDeps(tr.querySelector('.depbox'), it);
   tr.querySelectorAll('[data-b]').forEach(el => el.onchange = () => { it.buildsOn = el.value || null; update(); });
   tr.querySelectorAll('[data-d]').forEach(el => bindDate(el, () => it[el.dataset.d], iso => { it[el.dataset.d] = iso || null; update(); }));
-  tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.dataset.t === 'comments' ? el.value : (el.value.trim() || null); if (el.dataset.t === 'comments') { const c = document.querySelector(`tr[data-id="${it.id}"] input[data-f=comments]`); if (c) c.value = el.value; } update(); });
+  tr.querySelectorAll('[data-t]').forEach(el => el.oninput = () => { it[el.dataset.t] = el.dataset.t === 'comments' ? el.value : (el.value.trim() || null); if (el.dataset.t === 'comments') { const c = document.querySelector(`tr[data-id="${it.id}"] textarea[data-f=comments]`); if (c) { c.value = el.value; fitComment(c); } } update(); });
   tr.querySelectorAll('[data-k]').forEach(el => el.oninput = () => { it[el.dataset.k] = num(el.value); update(); });
   tr.querySelectorAll('[data-s]').forEach(el => el.oninput = () => {
     const v = num(el.value); if (v == null) delete it.overrides[el.dataset.s]; else it.overrides[el.dataset.s] = v; update();
@@ -996,18 +1016,24 @@ const COLHELP = {
   p80: 'Date the use case is 80% likely to be finished by, from the Monte Carlo forecast (effort varies between best and worst case).',
 };
 // Timeline table columns: every width is draggable and remembered in this browser.
-const DEF_COLW = { id: 56, name: 190, stage: 130, pri: 54, cx: 84, sme: 54, reuse: 50, dep: 130, dur: 62, start: 84, end: 84, due: 84, status: 80, cmt: 160 };
+const DEF_COLW = { id: 56, name: 190, stage: 52, pri: 44, cx: 52, sme: 50, reuse: 52, dep: 130, dur: 54, start: 84, end: 84, due: 84, status: 80, cmt: 160 };
 const COL_MIN = 30, COL_MAX = 700;
 function loadColW() {
-  let saved = {}; try { saved = JSON.parse(lsGet('colW') || '{}') || {}; } catch {}
+  let saved = {}; try { saved = JSON.parse(lsGet('colW2') || '{}') || {}; } catch {}
   const legacy = Number(lsGet('nameW')); if (legacy && saved.name == null) saved.name = legacy;   // older single-column setting
   const out = { ...DEF_COLW };
   for (const k in out) { const v = Number(saved[k]); if (v >= COL_MIN && v <= COL_MAX) out[k] = v; }
   return out;
 }
 let COLW = loadColW();
-const saveColW = () => lsSet('colW', JSON.stringify(COLW));
-const cols = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
+let HIDDEN = new Set(); try { HIDDEN = new Set(JSON.parse(lsGet('colHide') || '[]')); } catch {}
+const saveHidden = () => lsSet('colHide', JSON.stringify([...HIDDEN]));
+const initials = t => String(t).split(/\s+/).filter(w => !/^(and|of|the)$/i.test(w)).map(w => w[0].toUpperCase()).join('');
+// Short display forms for the Gantt table only (the underlying values, filters and paste keep the full words)
+const ABBR = { 2: initials, 4: initials, 5: t => String(t).slice(0, 1), 6: t => String(t).slice(0, 1), 8: t => String(t).replace(/ wks$/, 'w') };
+const saveColW = () => lsSet('colW2', JSON.stringify(COLW));
+const cols = () => COLS_RAW().map(c => HIDDEN.has(c[0]) ? [c[0], 0, c[2]] : c);
+const COLS_RAW = () => [['id', COLW.id, 'ID'], ['name', COLW.name, 'Task name'], ['stage', COLW.stage, 'Stage'], ['pri', COLW.pri, 'Pri'], ['cx', COLW.cx, 'Complexity'],
   ['sme', COLW.sme, 'SME req'], ['reuse', COLW.reuse, 'Reuse'], ['dep', COLW.dep, 'Depends on'], ['dur', COLW.dur, 'Duration'], ['start', COLW.start, 'Start'], ['end', COLW.end, 'Finish'], ['due', COLW.due, 'Required by'], ['status', COLW.status, 'Status'], ['cmt', COLW.cmt, 'Comments']];
 const lw = () => cols().reduce((a, c) => a + c[1], 0);
 let activeTab = 'timeline';
@@ -1063,7 +1089,7 @@ function leftRows(ui = true) {
       const it = byId[r.id] || {}, f = r.bars.find(b => b.type === 'stage');
       const idText = displayId;
       const deps = (it.dependsOn || []);
-      return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: it.sme || '', reuse: it.reuse || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || r.rank, url: itemUrl(it), name: r.name, triage: r.triage,
+      return { dep: deps.map(d => (byId[d.id] ? byId[d.id].name : '?')).join(', '), depTip: deps.map(d => (byId[d.id] ? byId[d.id].name : 'missing') + (d.until ? ' (until ' + ((state.config.stages.find(s => s.id === d.until) || {}).name || d.until) + ' completes)' : ' (until it finishes)')).join('; '), itemId: r.id, cx: cxName(it.complexity), sme: SME_LABEL[it.sme] || '', reuse: SME_LABEL[it.reuse] || '', stage: r.stageName, pri: r.priority ?? '', id: it.spId || r.rank, url: itemUrl(it), name: r.name, triage: r.triage,
         dur: r.end != null && r.begin != null ? r.end - r.begin : null, start: f ? f.startDate : null, end: r.endDate, none: r.triage ? 'Not started' : r.oos ? 'Out of scope' : '—', oos: !!r.oos, comments: it.comments || '', due: it.dueDate || null, di: dueInfo(it) }; }));
   return rows.map((r, i) => {
     const vals = [i === 0 ? '' : r.id, (r.comments ? '💬 ' : '') + r.name, r.stage || '', String(r.pri ?? ''), r.cx || '', r.sme || '', r.reuse || '', r.dep || '', r.dur != null ? wk(r.dur) + ' wks' : '—', r.start ? (r.triage ? '~' : '') + shortDate(r.start) : '—', r.end ? (r.triage ? '~' : '') + shortDate(r.end) : (r.none || '—'), r.due ? fmt(r.due) : '', r.di ? r.di.label : '', r.comments || ''];
@@ -1075,7 +1101,7 @@ function leftSVG(L, ui = true) {
   const H = L.height, W = lw(); let o = `<rect width="${W}" height="${H}" fill="#fff"/><rect width="${W}" height="${HH}" fill="#e9edf3"/>`;
   let x = 0; const xs = [], cs = cols();
   cs.forEach(c => {
-    xs.push(x); o += `<g class="gh"><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || '') + (ui ? ' Click to sort.' : ''))}</title><rect ${ui ? `data-gsort="${c[0]}" style="cursor:pointer" ` : ''}x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f" pointer-events="none">${esc(clip(c[2], c[1] - (gfilter[c[0]] || gsort.key === c[0] ? 30 : 10)))}${gsort.key === c[0] ? (gsort.dir === 1 ? ' ▲' : ' ▼') : ''}</text>${ui ? `<g data-gfilter="${c[0]}" class="${gfilter[c[0]] || gsort.key === c[0] ? 'on' : ''}" style="cursor:pointer"><title>Filter ${esc(c[2])}</title><rect x="${x + c[1] - 22}" y="${HH / 2 + 3}" width="18" height="${HH / 2 - 6}" rx="3" fill="${gfilter[c[0]] ? '#2f6fed' : 'transparent'}"/><text x="${x + c[1] - 13}" y="${HH / 2 + 15}" font-size="10" text-anchor="middle" fill="${gfilter[c[0]] ? '#fff' : '#5f6b7a'}" pointer-events="none">▾</text></g>` : ''}</g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
+    xs.push(x); if (!c[1]) return; o += `<g class="gh"><title>${esc(c[2] + ': ' + (COLHELP[c[0]] || '') + (ui ? ' Click to sort.' : ''))}</title><rect ${ui ? `data-gsort="${c[0]}" style="cursor:pointer" ` : ''}x="${x}" y="0" width="${c[1]}" height="${HH}" fill="transparent"/><text x="${x + 6}" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f" pointer-events="none">${esc(clip(c[2], c[1] - (gfilter[c[0]] || gsort.key === c[0] ? 30 : 10)))}${gsort.key === c[0] ? (gsort.dir === 1 ? ' ▲' : ' ▼') : ''}</text>${ui ? `<g data-gfilter="${c[0]}" class="${gfilter[c[0]] || gsort.key === c[0] ? 'on' : ''}" style="cursor:pointer"><title>Filter ${esc(c[2])}</title><rect x="${x + c[1] - 22}" y="${HH / 2 + 3}" width="18" height="${HH / 2 - 6}" rx="3" fill="${gfilter[c[0]] ? '#2f6fed' : 'transparent'}"/><text x="${x + c[1] - 13}" y="${HH / 2 + 15}" font-size="10" text-anchor="middle" fill="${gfilter[c[0]] ? '#fff' : '#5f6b7a'}" pointer-events="none">▾</text></g>` : ''}</g>`; x += c[1]; o += `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="#d5dae1"/>`;
     if (ui) o += `<rect data-resize="${c[0]}" x="${x - 4}" y="0" width="8" height="${HH}" fill="transparent" style="cursor:col-resize"><title>Drag to resize this column (double-click to fit)</title></rect><line x1="${x - 1}" x2="${x - 1}" y1="14" y2="${HH - 14}" stroke="#8b95a1" stroke-width="2" pointer-events="none"/>`;
   });
   const selPos = ui && gsel ? gsel.ids.map(id => plan.rows.findIndex(r => r.id === id)).filter(p => p >= 0).sort((a, b) => a - b) : [];
@@ -1087,9 +1113,11 @@ function leftSVG(L, ui = true) {
     const y = HH + i * RH, ty = y + RH / 2 + 4, w = r.bold ? 'font-weight="700"' : '';
     o += `<line x1="0" x2="${W}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`;
     r.vals.forEach((v, k) => {
+      if (!cs[k][1]) return;
+      const full = v; if (ABBR[k] && i > 0 && v !== '' && v !== '—' && !/^[–-]/.test(v)) v = ABBR[k](String(v).replace(/ ▾$/, '')) + (ui && / ▾$/.test(full) ? ' ▾' : '');
       const linked = r.url && k < 2 && v !== '';
       const dim = (r.triage && k === 2) || r.oos;
-      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="13" fill="${linked ? '#0b57d0' : k === 12 && r.di ? r.di.fg : dim ? '#8a94a3' : '#1c2430'}" ${k === 12 && r.di ? 'font-weight="700" ' : w}${linked ? ' text-decoration="underline"' : ''}>${esc(clip(v, cs[k][1] - 8))}</text>`;
+      const t = `<text x="${xs[k] + 6}" y="${ty}" font-size="13" fill="${linked ? '#0b57d0' : k === 12 && r.di ? r.di.fg : dim ? '#8a94a3' : '#1c2430'}" ${k === 12 && r.di ? 'font-weight="700" ' : w}${linked ? ' text-decoration="underline"' : ''}>${ABBR[k] && v !== full ? `<title>${esc(String(full).replace(/ ▾$/, ''))}</title>` : ''}${esc(clip(v, cs[k][1] - 8))}</text>`;
       if (r.comments && k === 1) { o += `<g><title>${esc(r.comments)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`; }
       if (k === 12 && r.di) o += `<g><title>${esc(r.di.label + ': ' + r.di.detail)}</title><rect x="${xs[k]}" y="${y}" width="${cs[k][1]}" height="${RH}" fill="transparent"/></g>`;
       o += linked ? `<a href=""${esc(r.url)}" target="_blank" rel="noopener"><title>Open in SharePoint: ${esc(r.name)}</title>${t}</a>` : (k === 7 && r.depTip ? `<g><title>Depends on: ${esc(r.depTip)}</title>${t}</g>` : t);
@@ -1214,7 +1242,7 @@ function downloadCSV() {
 
 /* ---- Export analysis: one self-contained HTML report (summary, timeline, every use case with the values used, settings by category) ---- */
 function exportAnalysis() {
-  const dueKpis = () => { const c = { after: 0, tight: 0, ok: 0 }; let n = 0; state.items.forEach(it => { const x = dueInfo(it); if (x) { n++; if (c[x.kind] != null) c[x.kind]++; } });
+  const dueKpis = () => { const c = { after: 0, tight: 0, ok: 0 }; let n = 0; state.items.filter(it => shown.has(it.id)).forEach(it => { const x = dueInfo(it); if (x) { n++; if (c[x.kind] != null) c[x.kind]++; } });
     return n ? `<div class="kpi"><div class="v"><span class="st st-after">${c.after}</span> after date · <span class="st st-tight">${c.tight}</span> tight · <span class="st st-ok">${c.ok}</span> on track</div><div class="k">${n} use cases with a required-by date</div></div>` : ''; };
   const c = state.config, stages = c.stages, stName = id => id === TRIAGE ? 'Stakeholder Triage' : id === OOS ? 'Out of scope' : (stages.find(x => x.id === id) || {}).name || '';
   const cxName = k => (c.complexities.find(x => x.key === k) || {}).name || '';
@@ -1224,14 +1252,16 @@ function exportAnalysis() {
   const td = (v, cls) => `<td${cls ? ` class="${cls}"` : ''}>${v === '' || v == null ? dash : v}</td>`;
   const th = (v, cls) => `<th${cls ? ` class="${cls}"` : ''}>${esc(v)}</th>`;
   const all = plan.allRows, rowOf = Object.fromEntries(all.map(r => [r.id, r]));
+  // Only rows currently visible: those passing both the Use cases filters and the Gantt filters
+  const shown = new Set(viewItems().map(x => x.it.id).filter(id => plan.rows.some(r => r.id === id))), filtered = shown.size < all.length;
   const eng = r => r.bars.find(b => b.type === 'stage' && stages[b.stageIdx]?.kind === 'eng');
   const label = (it, r) => (it.spId || (r && r.rank) || '') + ' · ' + it.name;
 
   // Timeline: bars at true size (12px text), labelled with ID and name only. Always every use case in default order.
   const keep = plan.rows; let svg = '';
   try {
-    plan.rows = all;
-    const L = layout(lw() + 1000), LW = 250, W = LW + L.width, H = L.height + 34, ord = Scheduler.orderItems(state);
+    plan.rows = all.filter(r => shown.has(r.id));
+    const L = layout(lw() + 1000), LW = 250, W = LW + L.width, H = L.height + 34, ord = Scheduler.orderItems(state).filter(it => shown.has(it.id));
     let left = `<rect width="${LW}" height="${H}" fill="#fff"/><rect width="${LW}" height="${HH}" fill="#e9edf3"/><text x="8" y="${HH / 2 + 14}" font-size="12" font-weight="600" fill="#33404f">Use case</text>` +
       `<text x="8" y="${HH + RH / 2 + 4}" font-size="12" font-weight="700" fill="#1c2430">Programme</text><line x1="0" x2="${LW}" y1="${HH + RH}" y2="${HH + RH}" stroke="#e8eaed"/>`;
     ord.forEach((it, i) => { const y = HH + (i + 1) * RH; left += `<text x="8" y="${y + RH / 2 + 4}" font-size="12" fill="${it.stage === OOS ? '#8a94a3' : '#1c2430'}">${esc(clip(label(it, rowOf[it.id]), LW - 12))}</text><line x1="0" x2="${LW}" y1="${y + RH}" y2="${y + RH}" stroke="#e8eaed"/>`; });
@@ -1251,7 +1281,8 @@ function exportAnalysis() {
     if (it.triageWeeks != null && it.triageWeeks !== '') o.push(`triage ${wk(it.triageWeeks)} wks`);
     return o.join('; '); };
   const note = (k, v) => v ? `<div class="sub2"><b>${k}</b> ${v}</div>` : '';
-  const rows = Scheduler.orderItems(state).map((it, i) => {
+  const rows = Scheduler.orderItems(state).filter(it => shown.has(it.id)).map((it, i0) => {
+    const i = (rowOf[it.id] && rowOf[it.id].rank ? rowOf[it.id].rank : i0 + 1) - 1;
     const r = rowOf[it.id] || {}, e = r.bars && eng(r), f = fc && fc.rows[it.id], url = itemUrl(it);
     const smeF = it.sme ? c.smeFactors[it.sme] : null, reF = it.reuse ? c.reuseFactors[it.reuse] : (it.buildsOn ? c.reuseFactors.M : null);
     const base = r.effortBase != null ? wk(r.effortBase) : '', used = r.effort != null ? `<b>${wk(r.effort)}</b>` : '';
@@ -1292,7 +1323,7 @@ function exportAnalysis() {
   .foot{color:var(--muted);font-size:12px;margin-top:20px} svg{display:block;max-width:100%;height:auto}
   @media print{body{background:#fff} main{padding:0} h2{break-after:avoid} tr{break-inside:avoid} .card{border:none;padding:0}} @page{size:A3 landscape;margin:12mm}
   </style></head><body><main>
-  <h1>Work plan analysis</h1><p class="lead">Generated ${when} · ${inScope} use cases${plan.oos ? ` (+${plan.oos} out of scope)` : ''} · ${c.devResources} developers · starts ${d(c.startDate)}</p>
+  <h1>Work plan analysis</h1><p class="lead">Generated ${when} · ${filtered ? `${shown.size} of ${all.length} use cases (filtered view)` : `${inScope} use cases`}${plan.oos ? ` (+${plan.oos} out of scope)` : ''} · ${c.devResources} developers · starts ${d(c.startDate)}</p>
   <div class="kpis">${kpi('Planned finish', d(plan.endDate))}${kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${plan.triage ? kpi('In triage (tentative)', plan.triage) : ''}${plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : ''}${dueKpis()}</div>
   <h2>Timeline</h2><div class="card">${svg}</div>
   <h2>Use cases</h2><div class="card">${useCases}</div>
