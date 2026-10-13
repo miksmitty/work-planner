@@ -1,10 +1,10 @@
 {
   "config": {
     "startDate": "2026-10-05",
-    "devResources": 17,
+    "devResources": 2,
     "defaultTeamCap": 2,
     "teamOverhead": 0.1,
-    "wipLimit": 10,
+    "wipLimit": 2,
     "triageWeeks": 4,
     "smeFactors": {
       "L": 1,
@@ -33,7 +33,7 @@
       {
         "id": "feasibility",
         "name": "Feasibility",
-        "weeks": 4,
+        "weeks": 2,
         "sme": true
       },
       {

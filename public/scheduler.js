@@ -35,7 +35,7 @@
   const DEFAULT_STAGES = () => [
     { id: 'ideation', name: 'Ideation', weeks: 2, sme: true },
     { id: 'discovery', name: 'Discovery', weeks: 2, sme: true },
-    { id: 'feasibility', name: 'Feasibility', weeks: 4, sme: true },
+    { id: 'feasibility', name: 'Feasibility', weeks: 2, sme: true },
     { id: 'eng', name: 'Build', kind: 'eng', reuse: true },
     { id: 'release', name: 'Validate and Release', weeks: 3, sme: true },
     { id: 'operate', name: 'Operate', weeks: 2 },
@@ -58,10 +58,10 @@
     return {
       config: {
         startDate: nextMonday(new Date()),
-        devResources: 4,
+        devResources: 2,
         defaultTeamCap: 2,
         teamOverhead: 0.1,
-        wipLimit: 6,
+        wipLimit: 2,
         triageWeeks: 4,
         smeFactors: DEFAULT_SME(),
         smeSemantics: 'required',
@@ -90,7 +90,7 @@
       delete c.preStages; delete c.postStages;
     }
     if (c.teamOverhead == null) c.teamOverhead = 0.1;
-    if (c.wipLimit == null) c.wipLimit = 6;
+    if (c.wipLimit == null) c.wipLimit = 2;
     if (c.triageWeeks == null) c.triageWeeks = 4;
     if (!c.smeFactors) { c.smeFactors = DEFAULT_SME(); c.smeSemantics = 'required'; }
     if (c.smeSemantics !== 'required') {

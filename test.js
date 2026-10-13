@@ -2,11 +2,12 @@ const assert = require('assert');
 const { schedule, forecast, defaultState, pertMean, orderItems, TRIAGE } = require('./public/scheduler.js');
 
 // Deterministic baseline: no variance, no team overhead, no WIP limit. Default stages:
-// Ideation 2, Discovery 2, Feasibility 4, Build (engineering), Validate and Release 3, Operate 2.
+// Ideation 2, Discovery 2, Feasibility 4 (set below; the app default is 2), Build (engineering), Validate and Release 3, Operate 2.
 const PRE = 2 + 2 + 4, POST = 3 + 2;
 function state(devs, items) {
   const s = defaultState();
   s.config.startDate = '2026-01-05';
+  s.config.stages.find(x => x.id === 'feasibility').weeks = 4;
   s.config.devResources = devs;
   s.config.defaultTeamCap = 2;
   s.config.teamOverhead = 0;

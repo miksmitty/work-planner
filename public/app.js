@@ -116,7 +116,8 @@ function bind() {
   $('#wrapCmt').onchange = () => { try { localStorage.setItem('wrapCmt', $('#wrapCmt').checked ? '1' : '0'); } catch {} document.body.classList.toggle('wrapcmt', $('#wrapCmt').checked); fitComments(); };
   $('#today').onchange = () => { try { localStorage.setItem('todayLine', $('#today').checked ? '1' : '0'); } catch {} renderGantt(); };
   $('#png').onclick = downloadPNG;
-  $('#analysis').onclick = exportAnalysis;
+  $('#analysis').onclick = () => showTab('report');
+  buildReportBar();
   $('#resetcols').onclick = () => { COLW = { ...DEF_COLW }; HIDDEN.clear(); saveColW(); saveHidden(); renderGantt(); };
   $('#colsbtn').onclick = e => {   // checklist of Gantt columns; the task name always stays
     e.stopPropagation(); const old = document.getElementById('colpop'); if (old) { old.remove(); return; }
@@ -802,6 +803,7 @@ function update() {
   });
   { const n = Object.keys(gfilter).length; $('#gclear').hidden = !n; $('#gfiltmsg').textContent = n ? `Filtered: showing ${plan.rows.length} of ${plan.allRows.length}` : ''; }
   renderGantt();
+  if (activeTab === 'report') renderReportSoon();
   clearTimeout(saveTimer);
   if (noSave) { $('#saved').textContent = 'Not saving: saved data failed to load'; return; }
   $('#saved').textContent = 'Saving…';
@@ -1051,8 +1053,10 @@ function showTab(t) {
   activeTab = t; lsSet('tab', t);
   document.querySelectorAll('.panel').forEach(p => p.hidden = p.id !== 'tab-' + t);
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelector('.capbar').hidden = t === 'report';
   applyZoom();
   if (t === 'timeline' && plan) renderGantt();
+  if (t === 'report' && plan) renderReport();
 }
 const showToday = () => $('#today').checked;
 function resolveBase(base, id) {
@@ -1241,13 +1245,103 @@ function downloadCSV() {
 
 
 /* ---- Export analysis: one self-contained HTML report (summary, timeline, every use case with the values used, settings by category) ---- */
-function exportAnalysis() {
-  const dueKpis = () => { const c = { after: 0, tight: 0, ok: 0 }; let n = 0; state.items.filter(it => shown.has(it.id)).forEach(it => { const x = dueInfo(it); if (x) { n++; if (c[x.kind] != null) c[x.kind]++; } });
+/* Runs inside the exported report (embedded via toString): click a heading to sort, use the row under it to filter. */
+function analysisTableScript() {
+  const t = document.querySelector('table.uc'); if (!t) return;
+  const head = t.tHead.rows[t.tHead.rows.length - 1], body = t.tBodies[0], rows = [...body.rows];
+  const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const clean = c => { const k = c.cloneNode(true); k.querySelectorAll('.sub2').forEach(e => e.remove()); const v = k.textContent.replace(/\s+/g, ' ').trim(); return v === '–' ? '' : v; };
+  const key = v => { if (v === '') return null; const x = v.replace(/^~/, '');
+    const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(x); if (m) return +m[3] * 372 + MON.indexOf(m[2].toLowerCase()) * 31 + +m[1];
+    const n = /^-?\d+(\.\d+)?/.exec(x); if (n && /^[\d.]+\s*(wks?)?$|^[\d.]+ \(/.test(x)) return parseFloat(n[0]);
+    return v.toLowerCase(); };
+  const cols = [...head.cells].map((th, i) => ({ th, i, vals: rows.map(r => clean(r.cells[i])) }));
+  const orig = new Map(rows.map((r, i) => [r, i]));
+  const fr = document.createElement('tr'); fr.className = 'flt';
+  const filters = cols.map(c => {
+    const td = document.createElement('th'); const uniq = [...new Set(c.vals.filter(Boolean))];
+    let el;
+    if (c.i > 1 && uniq.length > 1 && uniq.length <= 12 && !(c.th.classList.contains('n') && uniq.length > 6)) {
+      el = document.createElement('select'); el.innerHTML = '<option value="">All</option><option value="\u0001">(blank)</option>' + uniq.sort().map(u => '<option></option>').join('');
+      [...el.options].slice(2).forEach((o, j) => { o.value = o.textContent = uniq[j]; });
+    } else { el = document.createElement('input'); el.type = 'search'; el.placeholder = 'Filter'; }
+    el.oninput = el.onchange = apply; td.appendChild(el); fr.appendChild(td); return el;
+  });
+  head.parentNode.appendChild(fr);
+  const stick = () => { let y = bar.offsetHeight; [...t.tHead.rows].forEach(r => { [...r.cells].forEach(c => { c.style.top = y + 'px'; }); y += r.getBoundingClientRect().height; }); };
+  const bar = document.createElement('div'); bar.className = 'flt-bar';
+  bar.innerHTML = '<span class="cnt"></span> <button type="button">Clear filters</button>'; t.parentNode.insertBefore(bar, t); bar.style.top = '0'; bar.style.zIndex = 3;
+  stick(); window.addEventListener('resize', stick); window.addEventListener('load', stick); setTimeout(stick, 300); if (document.fonts) document.fonts.ready.then(stick);
+  bar.querySelector('button').onclick = () => { filters.forEach(f => f.value = ''); apply(); };
+  let sc = -1, dir = 1;
+  cols.forEach(c => { c.th.classList.add('sortable'); c.th.title = 'Click to sort';
+    c.th.onclick = () => { if (sc === c.i) { if (dir === 1) dir = -1; else { sc = -1; dir = 1; } } else { sc = c.i; dir = 1; }
+      cols.forEach(x => x.th.removeAttribute('data-dir')); if (sc >= 0) c.th.setAttribute('data-dir', dir === 1 ? 'asc' : 'desc'); apply(); }; });
+  function apply() {
+    const vis = rows.filter(r => cols.every((c, i) => { const f = filters[i], q = f.value; if (!q) return true;
+      if (f.tagName === 'SELECT') return q === '\u0001' ? c.vals[rows.indexOf(r)] === '' : c.vals[rows.indexOf(r)] === q;
+      return r.cells[i].textContent.toLowerCase().includes(q.toLowerCase()); }));
+    rows.forEach(r => { r.hidden = !vis.includes(r); });
+    const ord = rows.slice().sort((a, b) => { if (sc < 0) return orig.get(a) - orig.get(b);
+      const x = key(cols[sc].vals[rows.indexOf(a)]), y = key(cols[sc].vals[rows.indexOf(b)]);
+      if (x === null && y === null) return orig.get(a) - orig.get(b); if (x === null) return 1; if (y === null) return -1;
+      return (x < y ? -1 : x > y ? 1 : orig.get(a) - orig.get(b)) * dir; });
+    ord.forEach(r => body.appendChild(r));
+    bar.querySelector('.cnt').textContent = vis.length === rows.length ? rows.length + ' use cases' : vis.length + ' of ' + rows.length + ' use cases shown';
+  }
+  apply();
+}
+
+const ANALYSIS_PARTS = [
+  ['kpis', 'Summary figures'],
+  ['timeline', 'Timeline chart'],
+  ['usecases', 'Use cases table (with notes and explanation)'],
+  ['settings', 'Settings'],
+  ['data', 'Embedded data (lets the report be re-imported)']
+];
+function reportSel() {
+  let saved = {}; try { saved = JSON.parse(lsGet('analysisParts') || '{}'); } catch {}
+  const sel = {}; ANALYSIS_PARTS.forEach(([k]) => sel[k] = saved[k] !== false); sel.noDates = !!saved.noDates;
+  if (sel.noDates) { sel.timeline = false; sel.data = false; }
+  return sel;
+}
+function buildReportBar() {
+  const bar = $('#rpbar'); if (!bar) return;
+  const sel = reportSel(); bar.innerHTML =
+    `<label class="rpnd" title="Leaves out the timeline, forecast, planned and required-by dates and start date. Keeps use cases, stages, priority, size, SME, Reuse, effort and dependencies."><input type="checkbox" data-p="noDates" ${sel.noDates ? 'checked' : ''}> <b>Without dates</b> <span class="hint">(for another team's planning)</span></label>` +
+    ANALYSIS_PARTS.map(([k, t]) => `<label class="hint"><input type="checkbox" data-p="${k}" ${sel[k] ? 'checked' : ''}> ${esc(t)}</label>`).join('') +
+    `<span class="grow"></span><button id="rp-dl" class="primary">Download report</button>`;
+  const boxes = [...bar.querySelectorAll('[data-p]')], nd = boxes.find(b => b.dataset.p === 'noDates');
+  const sync = () => boxes.forEach(b => { if (b.dataset.p === 'timeline' || b.dataset.p === 'data') { b.disabled = nd.checked; b.parentNode.style.opacity = nd.checked ? .45 : ''; } });
+  const read = () => Object.fromEntries(boxes.map(b => [b.dataset.p, b.checked]));
+  sync();
+  boxes.forEach(b => b.onchange = () => { sync(); lsSet('analysisParts', JSON.stringify(read())); renderReport(); });
+  $('#rp-dl').onclick = () => {
+    const sel = reportSel();
+    if (!Object.entries(sel).some(([k, v]) => v && k !== 'noDates')) { alert('Tick at least one element to export.'); return; }
+    buildAnalysis(sel, true);
+  };
+}
+let rpTimer;
+function renderReportSoon() { clearTimeout(rpTimer); rpTimer = setTimeout(renderReport, 250); }
+function renderReport() {
+  const fr = $('#rpframe'); if (!fr || !plan) return;
+  const sel = reportSel(), none = !Object.entries(sel).some(([k, v]) => v && k !== 'noDates');
+  $('#rpmsg').textContent = none ? 'Nothing selected: tick at least one element.' : (shown_count_msg());
+  fr.srcdoc = none ? '<body style="font:14px sans-serif;color:#667085;padding:30px">Nothing selected.</body>' : buildAnalysis(sel, false);
+}
+function shown_count_msg() {
+  const n = viewItems().filter(x => plan.rows.some(r => r.id === x.it.id)).length;
+  return n < plan.allRows.length ? `Preview of the export: ${n} of ${plan.allRows.length} use cases (your current Use cases / Timeline filters apply).` : 'Preview of exactly what will be exported.';
+}
+function buildAnalysis(sel, download) {
+  const ND = !!sel.noDates;
+  const dueKpis = () => { if (ND) return ''; const c = { after: 0, tight: 0, ok: 0 }; let n = 0; state.items.filter(it => shown.has(it.id)).forEach(it => { const x = dueInfo(it); if (x) { n++; if (c[x.kind] != null) c[x.kind]++; } });
     return n ? `<div class="kpi"><div class="v"><span class="st st-after">${c.after}</span> after date · <span class="st st-tight">${c.tight}</span> tight · <span class="st st-ok">${c.ok}</span> on track</div><div class="k">${n} use cases with a required-by date</div></div>` : ''; };
   const c = state.config, stages = c.stages, stName = id => id === TRIAGE ? 'Stakeholder Triage' : id === OOS ? 'Out of scope' : (stages.find(x => x.id === id) || {}).name || '';
   const cxName = k => (c.complexities.find(x => x.key === k) || {}).name || '';
   const lvl = { H: 'High', M: 'Medium', L: 'Low' }, byId = Object.fromEntries(state.items.map(i => [i.id, i]));
-  const d = x => x ? shortDate(x) : '';
+  const d = x => x && !ND ? shortDate(x) : '';
   const dash = '<span class="na">–</span>';
   const td = (v, cls) => `<td${cls ? ` class="${cls}"` : ''}>${v === '' || v == null ? dash : v}</td>`;
   const th = (v, cls) => `<th${cls ? ` class="${cls}"` : ''}>${esc(v)}</th>`;
@@ -1276,11 +1370,11 @@ function exportAnalysis() {
     Object.entries(it.overrides || {}).forEach(([k, w]) => { if (w != null && w !== '') o.push(`${esc(stName(k))} fixed at ${wk(w)} wks`); });
     if (it.effortOverride != null && it.effortOverride !== '') o.push(`effort fixed at ${wk(it.effortOverride)} dev-wks`);
     if (it.teamCap != null && it.teamCap !== '') o.push(`max ${it.teamCap} developers`);
-    if (it.earliestStart) o.push(`not before ${d(it.earliestStart)}`);
-    if (it.stageStart) o.push(`in stage since ${d(it.stageStart)}`);
+    if (it.earliestStart && !ND) o.push(`not before ${d(it.earliestStart)}`);
+    if (it.stageStart && !ND) o.push(`in stage since ${d(it.stageStart)}`);
     if (it.triageWeeks != null && it.triageWeeks !== '') o.push(`triage ${wk(it.triageWeeks)} wks`);
     return o.join('; '); };
-  const note = (k, v) => v ? `<div class="sub2"><b>${k}</b> ${v}</div>` : '';
+  const note = (k, v) => v && sel.usecases ? `<div class="sub2"><b>${k}</b> ${v}</div>` : '';
   const rows = Scheduler.orderItems(state).filter(it => shown.has(it.id)).map((it, i0) => {
     const i = (rowOf[it.id] && rowOf[it.id].rank ? rowOf[it.id].rank : i0 + 1) - 1;
     const r = rowOf[it.id] || {}, e = r.bars && eng(r), f = fc && fc.rows[it.id], url = itemUrl(it);
@@ -1288,17 +1382,17 @@ function exportAnalysis() {
     const base = r.effortBase != null ? wk(r.effortBase) : '', used = r.effort != null ? `<b>${wk(r.effort)}</b>` : '';
     const di = dueInfo(it);
     const finish = r.endDate ? (r.triage ? '~' : '') + d(r.endDate) : (it.stage === OOS ? 'Out of scope' : '');
-    return `<tr${it.stage === OOS ? ' class="oos"' : ''}>${td(i + 1, 'n')}<td class="name"><b>${esc(it.name)}</b>${url ? ` <a href="${esc(url)}">${esc(it.spId || 'link')} ↗</a>` : it.spId ? ` <span class="id">${esc(it.spId)}</span>` : ''}` +
+    return `<tr${it.stage === OOS ? ' class="oos"' : ''}>${td(`<span class="rk">${i + 1}</span>`, 'n')}<td class="name"><b>${esc(it.name)}</b>${url ? ` <a href="${esc(url)}">${esc(it.spId || 'link')} ↗</a>` : it.spId ? ` <span class="id">${esc(it.spId)}</span>` : ''}` +
       note('Depends on', depText(it)) + note('Overrides', overrides(it)) + note('Comment', esc(it.comments || '')) + '</td>' +
-      td(esc(stName(it.stage))) + td(it.priority ?? '', 'n') + td(esc(cxName(it.complexity))) + td(it.sme ? `${lvl[it.sme]} (×${smeF})` : '') + td(it.reuse ? `${lvl[it.reuse]} (×${reF})${r.reusePending ? ' – pending' : ''}` : '') +
-      td(base, 'n') + td(used, 'n') + td(e ? `${d(e.startDate)} → ${d(e.endDate)}${r.queueWeeks > 0 ? `<div class="sub2">waits ${wk(r.queueWeeks)} wks for developers</div>` : ''}` : '') + td(finish, 'n') + td(f ? d(f.p80Date) : '', 'n') + td(it.dueDate ? d(it.dueDate) : '', 'n') + td(di ? `<span class="st st-${di.kind}">${di.label}</span><div class="sub2">${esc(di.detail)}</div>` : '') + '</tr>';
+      td(stName(it.stage) ? `<span class="pill s${it.stage === TRIAGE ? 3 : it.stage === OOS ? 6 : stages.findIndex(x => x.id === it.stage) % 6}">${esc(stName(it.stage))}</span>` : '') + td(it.priority != null && it.priority !== '' ? `<span class="pri">${esc(it.priority)}</span>` : '', 'n') + td(cxName(it.complexity) ? `<span class="pill c${Math.min(4, Math.max(0, c.complexities.findIndex(x => x.key === it.complexity)))}">${esc(cxName(it.complexity))}</span>` : '') + td(it.sme ? `${lvl[it.sme]} (×${smeF})` : '') + td(it.reuse ? `${lvl[it.reuse]} (×${reF})${r.reusePending ? ' – pending' : ''}` : '') +
+      td(base, 'n') + td(used, 'n') + (ND ? '' : td(e ? `${d(e.startDate)} → ${d(e.endDate)}${r.queueWeeks > 0 ? `<div class="sub2">waits ${wk(r.queueWeeks)} wks for developers</div>` : ''}` : '') + td(finish, 'n') + td(f ? d(f.p80Date) : '', 'n') + td(it.dueDate ? d(it.dueDate) : '', 'n') + td(di ? `<span class="st st-${di.kind}">${di.label}</span><div class="sub2">${esc(di.detail)}</div>` : '')) + '</tr>';
   });
-  const useCases = `<table class="uc"><thead><tr class="grp"><th></th><th></th><th colspan="5" class="g1">What you entered</th><th colspan="2" class="g2">Build effort (dev-wks)</th><th colspan="3" class="g3">Forecast</th><th colspan="2" class="g3">Required by</th></tr>
-    <tr>${th('#', 'n')}${th('Use case')}${th('Stage')}${th('Priority', 'n')}${th('Complexity')}${th('SME required')}${th('Reuse')}${th('From complexity', 'n')}${th('Used (after Reuse)', 'n')}${th('Build dates')}${th('Planned finish', 'n')}${th('80% confident', 'n')}${th('Date', 'n')}${th('Status')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  const useCases = `<table class="uc"><thead><tr class="grp"><th class="g0"></th><th class="g0"></th><th colspan="5" class="g1">What you entered</th><th colspan="2" class="g2">Build effort (dev-wks)</th>${ND ? '' : '<th colspan="3" class="g3">Forecast</th><th colspan="2" class="g4">Required by</th>'}</tr>
+    <tr>${th('#', 'n')}${th('Use case')}${th('Stage')}${th('Priority', 'n')}${th('Complexity')}${th('SME required')}${th('Reuse')}${th('From complexity', 'n')}${th('Used (after Reuse)', 'n')}${ND ? '' : th('Build dates') + th('Planned finish', 'n') + th('80% confident', 'n') + th('Date', 'n') + th('Status')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
 
   // Settings: four equal cards
   const kv = (k, v, n) => `<tr>${th(k)}<td>${v}${n ? `<div class="sub2">${esc(n)}</div>` : ''}</td></tr>`;
-  const general = `<table class="kv"><tbody>${kv('Developers', c.devResources, 'Shared engineering pool')}${kv('Max per use case', c.defaultTeamCap, 'Most developers on one use case')}${kv('Max in flight', c.wipLimit || 'none', 'Most use cases in progress at once')}${kv('Team overhead', Math.round((c.teamOverhead || 0) * 100) + '%', 'Throughput lost per extra developer')}${kv('Start date', d(c.startDate))}${kv('Triage estimate', wk(c.triageWeeks) + ' wks', 'Default Stakeholder Triage length')}${kv('SharePoint base URL', esc(c.spLinkBase || '') || dash)}</tbody></table>`;
+  const general = `<table class="kv"><tbody>${kv('Developers', c.devResources, 'Shared engineering pool')}${kv('Max per use case', c.defaultTeamCap, 'Most developers on one use case')}${kv('Max in flight', c.wipLimit || 'none', 'Most use cases in progress at once')}${kv('Team overhead', Math.round((c.teamOverhead || 0) * 100) + '%', 'Throughput lost per extra developer')}${ND ? '' : kv('Start date', d(c.startDate))}${kv('Triage estimate', wk(c.triageWeeks) + ' wks', 'Default Stakeholder Triage length')}${kv('SharePoint base URL', esc(c.spLinkBase || '') || dash)}</tbody></table>`;
   const stageTbl = `<table><thead><tr>${th('#', 'n')}${th('Stage')}${th('Length', 'n')}${th('SME applies')}${th('Reuse applies')}</tr></thead><tbody>${stages.map((st, i) => `<tr>${td(i + 1, 'n')}${td(esc(st.name))}${td(st.kind === 'eng' ? 'from size' : wk(st.weeks) + ' wks', 'n')}${td(st.sme ? 'Yes' : 'No')}${td(st.reuse ? 'Yes' : 'No')}</tr>`).join('')}</tbody></table>`;
   const sizeTbl = `<table><thead><tr>${th('Complexity')}${th('Best', 'n')}${th('Likely', 'n')}${th('Worst', 'n')}${th('Expected', 'n')}</tr></thead><tbody>${c.complexities.map(x => `<tr>${td(esc(x.name))}${td(x.min, 'n')}${td(x.effort, 'n')}${td(x.max, 'n')}${td(wk(Scheduler.pertMean(x)), 'n')}</tr>`).join('')}</tbody></table><div class="sub2">Developer-weeks of Build effort. Expected = (best + 4 × likely + worst) ÷ 6.</div>`;
   const facTbl = `<table><thead><tr>${th('Level')}${th('SME required', 'n')}${th('Reuse', 'n')}</tr></thead><tbody>${['H', 'M', 'L'].map(k => `<tr>${td(lvl[k])}${td('×' + c.smeFactors[k], 'n')}${td('×' + c.reuseFactors[k], 'n')}</tr>`).join('')}</tbody></table>
@@ -1306,34 +1400,63 @@ function exportAnalysis() {
 
   const inScope = all.length - plan.oos, hasFc = !!fc, when = new Date().toISOString().slice(0, 10);
   const kpi = (k, v) => `<div class="kpi"><div class="v">${v}</div><div class="k">${esc(k)}</div></div>`;
+  const cards = [['general', 'General', general], ['stages', 'Stages', stageTbl], ['sizes', 'Engineering size by complexity', sizeTbl], ['factors', 'SME required and Reuse factors', facTbl]].filter(() => sel.settings).map(x => `<div class="card"><h3>${x[1]}</h3>${x[2]}</div>`);
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Work plan analysis ${when}</title><style>
-  :root{--text:#1c2430;--muted:#5f6b7a;--line:#dfe3e8;--bg:#f6f7f9;--accent:#2f6fed}
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  main{max-width:1400px;margin:0 auto;padding:28px 20px 56px}
-  h1{font-size:24px;margin:0 0 2px} h2{font-size:16px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)} h3{font-size:13px;margin:0 0 8px}
-  .lead{color:var(--muted);margin:0 0 16px} .sub2{color:var(--muted);font-size:12px;margin-top:2px} .na{color:#b3bac4}
-  .kpis{display:flex;flex-wrap:wrap;gap:10px} .kpi{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 16px;min-width:140px} .kpi .v{font-size:18px;font-weight:700} .kpi .k{color:var(--muted);font-size:12px}
-  .card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:12px;align-items:start}
-  table{border-collapse:collapse;width:100%;font-size:12px} th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top} thead th{background:#eef1f5;font-weight:600;white-space:nowrap}
-  .n{text-align:right;font-variant-numeric:tabular-nums} table.kv th{background:none;font-weight:600;width:140px;white-space:normal} table.kv td{vertical-align:top;overflow-wrap:anywhere} .grid thead th{white-space:normal}
-  .uc .grp th{background:none;border-bottom:2px solid var(--line);text-align:center;color:var(--muted);font-size:12px;padding-bottom:2px} .uc .g1{border-left:1px solid var(--line)} .uc .g2,.uc .g3{border-left:1px solid var(--line)}
-  .uc td.n{white-space:nowrap} .uc td:last-child{min-width:170px} .uc td.name{min-width:260px} .uc tbody tr:nth-child(even){background:#fafbfc} tr.oos td{color:#8a94a3} .id{color:var(--muted)} a{color:var(--accent);text-decoration:none}
-  .st{font-weight:700} .st-ok{color:#1a7f37} .st-tight{color:#8a6500} .st-after{color:#b4501e} .st-none{color:#6b7686}
-  .foot{color:var(--muted);font-size:12px;margin-top:20px} svg{display:block;max-width:100%;height:auto}
-  @media print{body{background:#fff} main{padding:0} h2{break-after:avoid} tr{break-inside:avoid} .card{border:none;padding:0}} @page{size:A3 landscape;margin:12mm}
-  </style></head><body><main>
-  <h1>Work plan analysis</h1><p class="lead">Generated ${when} · ${filtered ? `${shown.size} of ${all.length} use cases (filtered view)` : `${inScope} use cases`}${plan.oos ? ` (+${plan.oos} out of scope)` : ''} · ${c.devResources} developers · starts ${d(c.startDate)}</p>
-  <div class="kpis">${kpi('Planned finish', d(plan.endDate))}${kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${plan.triage ? kpi('In triage (tentative)', plan.triage) : ''}${plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : ''}${dueKpis()}</div>
-  <h2>Timeline</h2><div class="card">${svg}</div>
-  <h2>Use cases</h2><div class="card">${useCases}</div>
-  <p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>Required by</b>: “After date” = planned finish is after the date; “Tight” = planned finish meets it but the 80% confident date does not. <b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>
-  <h2>Settings</h2><div class="grid"><div class="card"><h3>General</h3>${general}</div><div class="card"><h3>Stages</h3>${stageTbl}</div><div class="card"><h3>Engineering size by complexity</h3>${sizeTbl}</div><div class="card"><h3>SME required and Reuse factors</h3>${facTbl}</div></div>
-  <script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: state.items }).replace(/</g, '\\u003c')}</script>
-  </main></body></html>`;
+  :root{--text:#172033;--muted:#667085;--line:#e4e8ee;--bg:#f2f4f8;--accent:#3b5bdb;--accent2:#7048e8;--card:#fff}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .hero{background:linear-gradient(120deg,#1b2a6b 0%,#3b5bdb 55%,#7048e8 100%);color:#fff;padding:36px 20px 76px}
+  .hero .in{max-width:1400px;margin:0 auto;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;justify-content:space-between}
+  .hero .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.75;font-weight:600}
+  .hero h1{font-size:34px;line-height:1.15;margin:4px 0 8px;font-weight:750;letter-spacing:-.02em}
+  .hero .lead{margin:0;opacity:.85;font-size:13px} .hero .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .hero .chip{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);border-radius:99px;padding:3px 12px;font-size:12px;backdrop-filter:blur(4px)}
+  .hero .big{text-align:right} .hero .big .v{font-size:40px;font-weight:800;letter-spacing:-.02em;line-height:1.1} .hero .big .k{font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.1em}
+  main{max-width:1400px;margin:-48px auto 0;padding:0 20px 56px}
+  h2{font-size:17px;margin:34px 0 12px;display:flex;align-items:center;gap:10px;letter-spacing:-.01em} h2::before{content:"";width:5px;height:18px;border-radius:3px;background:linear-gradient(var(--accent),var(--accent2))}
+  h3{font-size:13px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .sub2{color:var(--muted);font-size:12px;margin-top:2px} .na{color:#c1c8d2}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px} .kpi{background:var(--card);border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 6px 16px rgba(16,24,40,.07);border-top:3px solid var(--accent)}
+  .kpi:nth-child(3n+2){border-top-color:var(--accent2)} .kpi:nth-child(3n){border-top-color:#0ca678} .kpi .v{font-size:22px;font-weight:750;letter-spacing:-.01em;font-variant-numeric:tabular-nums} .kpi .k{color:var(--muted);font-size:12px;margin-top:2px}
+  .kpi .v .st{background:none;padding:0;font-size:inherit}
+  .card{background:var(--card);border-radius:12px;padding:16px;overflow-x:auto;box-shadow:0 1px 2px rgba(16,24,40,.06),0 6px 16px rgba(16,24,40,.06)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px;align-items:start}
+  table{border-collapse:collapse;width:100%;font-size:12px} th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top} thead th{background:#eef1f8;font-weight:650;white-space:nowrap;color:#344054}
+  .n{text-align:right;font-variant-numeric:tabular-nums} table.kv th{background:none;font-weight:600;width:140px;white-space:normal;color:var(--text)} table.kv td{vertical-align:top;overflow-wrap:anywhere} .grid thead th{white-space:normal}
+  .card.tw{padding:0;overflow:auto;max-height:78vh}
+  .uc thead th{position:sticky;z-index:2}
+  .uc .grp th{background:#fff;border-bottom:none;text-align:center;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#fff;padding:7px 4px;border-left:2px solid #fff}
+  .uc .grp th.g0{background:#fff} .uc .grp .g1{background:#5c7cfa} .uc .grp .g2{background:#7048e8} .uc .grp .g3{background:#0ca678} .uc .grp .g4{background:#f08c00}
+  .uc td.n{white-space:nowrap} .uc td:last-child{min-width:170px} .uc td.name{min-width:260px} .uc tbody tr:hover{background:#f1f4ff} tr.oos td{color:#98a2b3} .id{color:var(--muted)} a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .uc td.name b{font-weight:650}
+  .flt-bar{display:flex;gap:12px;align-items:center;margin:0;padding:10px 16px;color:var(--muted);font-size:12px;background:#fff;border-bottom:1px solid var(--line);position:sticky;left:0} .flt-bar button{font:inherit;padding:3px 12px;border:1px solid var(--line);border-radius:99px;background:#fff;cursor:pointer} .flt-bar button:hover{background:#f1f4ff}
+  .uc th.sortable{cursor:pointer;user-select:none} .uc th.sortable:hover{background:#e0e6f5} .uc th[data-dir=asc]::after{content:" \\25B2";font-size:9px;color:var(--accent)} .uc th[data-dir=desc]::after{content:" \\25BC";font-size:9px;color:var(--accent)}
+  .uc tr.flt th{background:#f8f9fc;padding:5px 6px;font-weight:400} .uc tr.flt input,.uc tr.flt select{width:100%;min-width:60px;font:inherit;font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+  .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap;background:#eef1f6;color:#475467}
+  .s0{background:#e7f0ff;color:#1c4fb8}.s1{background:#efe9ff;color:#5b34c4}.s2{background:#e1f7f0;color:#0a7a5a}.s3{background:#fff2d9;color:#935c00}.s4{background:#ffe8ec;color:#b3234a}.s5{background:#e0f5fb;color:#0b6f87}
+  .c0{background:#e6f6ec;color:#17693a}.c1{background:#e8f1ff;color:#1c4fb8}.c2{background:#fff2d9;color:#935c00}.c3{background:#ffe6d6;color:#a8400f}.c4{background:#ffe3e6;color:#a61e3a}
+  .pri{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;border-radius:50%;background:#172033;color:#fff;font-weight:700;font-size:11.5px}
+  .rk{color:var(--muted);font-weight:600}
+  .st{font-weight:650;display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px} .st-ok{color:#17693a;background:#e2f6e9} .st-tight{color:#8a5a00;background:#fff1cc} .st-after{color:#a8400f;background:#ffe3d3} .st-none{color:#6b7686;background:#eef1f6}
+  .foot{color:var(--muted);font-size:12px;margin-top:16px;max-width:1000px} svg{display:block;max-width:100%;height:auto}
+  .brand{margin-top:34px;text-align:center;color:#98a2b3;font-size:11.5px}
+  @media print{.flt,.flt-bar{display:none} body{background:#fff} .hero{background:#1b2a6b;-webkit-print-color-adjust:exact;print-color-adjust:exact;padding-bottom:40px} main{padding:0;margin-top:12px} h2{break-after:avoid} tr{break-inside:avoid} .card{box-shadow:none;border:1px solid var(--line)} .card.tw{max-height:none;overflow:visible} .uc thead th{position:static} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}} @page{size:A3 landscape;margin:12mm}
+  @media(max-width:700px){.hero h1{font-size:26px}.hero .big{text-align:left}}
+  </style></head><body><header class="hero"><div class="in"><div><div class="eyebrow">Work Planner · ${when}</div><h1>Work plan analysis</h1>
+  <p class="lead">${filtered ? `${shown.size} of ${all.length} use cases (filtered view)` : `${inScope} use cases`}${plan.oos ? ` (+${plan.oos} out of scope)` : ''}</p>
+  <div class="chips"><span class="chip">${c.devResources} developers</span>${ND ? '<span class="chip">Scope and effort only · no dates</span>' : `<span class="chip">Starts ${d(c.startDate)}</span><span class="chip">${wk(plan.totalWeeks)} weeks</span>${hasFc ? `<span class="chip">80% confident by ${d(fc.p80.date)}</span>` : ''}`}</div></div>
+  <div class="big">${ND ? `<div class="k">Total effort</div><div class="v">${Math.round(plan.totalEffort)} dev-wks</div>` : `<div class="k">Planned finish</div><div class="v">${d(plan.endDate)}</div>`}</div></div></header><main>
+  ${sel.kpis ? `<div class="kpis">${ND ? kpi('Use cases', inScope) : kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${ND ? '' : hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${ND ? '' : (plan.triage ? kpi('In triage (tentative)', plan.triage) : '') + (plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : '')}${dueKpis()}</div>` : ''}
+  ${sel.timeline ? `<h2>Timeline</h2><div class="card">${svg}</div>` : ''}
+  ${sel.usecases ? `<h2>Use cases</h2><div class="card tw">${useCases}</div><script>(${analysisTableScript.toString()})()</script>` : ''}
+  ${sel.usecases && ND ? `<p class="foot">Use cases are listed in priority order (most advanced stage first). <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor. No dates or schedule are included in this export.</p>` : ''}
+  ${sel.usecases && !ND ? `<p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>Required by</b>: “After date” = planned finish is after the date; “Tight” = planned finish meets it but the 80% confident date does not. <b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>` : ''}
+  ${cards.length ? `<h2>Settings</h2><div class="grid">${cards.join('')}</div>` : ''}
+  ${sel.data ? `<script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: state.items }).replace(/</g, '\\u003c')}</script>` : ''}
+  <div class="brand">Generated by Work Planner</div></main></body></html>`;
+  if (!download) return html;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-  a.download = `work-planner-analysis-${when}.html`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  a.download = `work-planner-analysis${ND ? '-no-dates' : ''}-${when}.html`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   return html;
 }
 
