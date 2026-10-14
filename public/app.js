@@ -71,6 +71,8 @@ function bind() {
   $('#devs').oninput = e => { c().devResources = Number(e.target.value); update(); };
   $('#cap').oninput = e => { c().defaultTeamCap = Number(e.target.value); update(); };
   $('#wip').oninput = e => { c().wipLimit = Number(e.target.value) || 0; update(); };
+  $('#early').onchange = e => { c().earlyDevs = e.target.checked; $('#earlyload').disabled = !e.target.checked; update(); };
+  $('#earlyload').oninput = e => { c().earlyDevLoad = Number(e.target.value) > 0 ? Number(e.target.value) : 1; update(); };
   $('#ovh').oninput = e => { c().teamOverhead = (Number(e.target.value) || 0) / 100; update(); };
   bindDate($('#start'), () => c().startDate, iso => { if (iso) { c().startDate = iso; update(); } });
   $('#spbase').oninput = e => { c().spLinkBase = e.target.value.trim() || undefined; renderRows(); update(); };
@@ -277,7 +279,7 @@ function nudge(inp, dir) {
 }
 function syncInputs() {
   const c = state.config;
-  $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#start').value = fmt(c.startDate); $('#spbase').value = c.spLinkBase || '';
+  $('#devs').value = c.devResources; $('#cap').value = c.defaultTeamCap; $('#wip').value = c.wipLimit || ''; $('#ovh').value = Math.round((c.teamOverhead || 0) * 100); $('#early').checked = !!c.earlyDevs; $('#earlyload').value = c.earlyDevLoad || 1; $('#earlyload').disabled = !c.earlyDevs; $('#start').value = fmt(c.startDate); $('#spbase').value = c.spLinkBase || '';
 }
 const TRIAGE = Scheduler.TRIAGE, OOS = Scheduler.OOS;
 // "0. Stakeholder Triage" = clock not started; then the configured stages in order.
@@ -1392,7 +1394,7 @@ function buildAnalysis(sel, download) {
 
   // Settings: four equal cards
   const kv = (k, v, n) => `<tr>${th(k)}<td>${v}${n ? `<div class="sub2">${esc(n)}</div>` : ''}</td></tr>`;
-  const general = `<table class="kv"><tbody>${kv('Developers', c.devResources, 'Shared engineering pool')}${kv('Max per use case', c.defaultTeamCap, 'Most developers on one use case')}${kv('Max in flight', c.wipLimit || 'none', 'Most use cases in progress at once')}${kv('Team overhead', Math.round((c.teamOverhead || 0) * 100) + '%', 'Throughput lost per extra developer')}${ND ? '' : kv('Start date', d(c.startDate))}${kv('Triage estimate', wk(c.triageWeeks) + ' wks', 'Default Stakeholder Triage length')}${kv('SharePoint base URL', esc(c.spLinkBase || '') || dash)}</tbody></table>`;
+  const general = `<table class="kv"><tbody>${kv('Developers', c.devResources, 'Shared engineering pool')}${kv('Max per use case', c.defaultTeamCap, 'Most developers on one use case')}${kv('Max in flight', c.wipLimit || 'none', 'Most use cases in progress at once')}${kv('Early stages need developers', c.earlyDevs ? (c.earlyDevLoad || 1) + ' per use case' : 'No', 'Developers held during stages before Build')}${kv('Team overhead', Math.round((c.teamOverhead || 0) * 100) + '%', 'Throughput lost per extra developer')}${ND ? '' : kv('Start date', d(c.startDate))}${kv('Triage estimate', wk(c.triageWeeks) + ' wks', 'Default Stakeholder Triage length')}${kv('SharePoint base URL', esc(c.spLinkBase || '') || dash)}</tbody></table>`;
   const stageTbl = `<table><thead><tr>${th('#', 'n')}${th('Stage')}${th('Length', 'n')}${th('SME applies')}${th('Reuse applies')}</tr></thead><tbody>${stages.map((st, i) => `<tr>${td(i + 1, 'n')}${td(esc(st.name))}${td(st.kind === 'eng' ? 'from size' : wk(st.weeks) + ' wks', 'n')}${td(st.sme ? 'Yes' : 'No')}${td(st.reuse ? 'Yes' : 'No')}</tr>`).join('')}</tbody></table>`;
   const sizeTbl = `<table><thead><tr>${th('Complexity')}${th('Best', 'n')}${th('Likely', 'n')}${th('Worst', 'n')}${th('Expected', 'n')}</tr></thead><tbody>${c.complexities.map(x => `<tr>${td(esc(x.name))}${td(x.min, 'n')}${td(x.effort, 'n')}${td(x.max, 'n')}${td(wk(Scheduler.pertMean(x)), 'n')}</tr>`).join('')}</tbody></table><div class="sub2">Developer-weeks of Build effort. Expected = (best + 4 × likely + worst) ÷ 6.</div>`;
   const facTbl = `<table><thead><tr>${th('Level')}${th('SME required', 'n')}${th('Reuse', 'n')}</tr></thead><tbody>${['H', 'M', 'L'].map(k => `<tr>${td(lvl[k])}${td('×' + c.smeFactors[k], 'n')}${td('×' + c.reuseFactors[k], 'n')}</tr>`).join('')}</tbody></table>

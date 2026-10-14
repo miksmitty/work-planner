@@ -11,6 +11,8 @@
 //   - Dependencies: a use case can depend (finish-to-start) on others, optionally until a given stage completes.
 //     With `fromBuild`, the dependent skips the stages before Build and starts at Build once that predecessor is done.
 //   - WIP limit: at most `wipLimit` use cases in flight at once (no multitasking / Little's law).
+//   - Optional early-stage staffing: with `earlyDevs` on, each use case holds `earlyDevLoad` developers from the pool
+//     for the whole of its stages before Build, and only starts when that many are free.
 //   - Monte Carlo forecast: sample effort from a PERT-beta distribution, re-run the plan many
 //     times, report P50/P80/P90 completion.
 (function (root) {
@@ -62,6 +64,8 @@
         defaultTeamCap: 2,
         teamOverhead: 0.1,
         wipLimit: 2,
+        earlyDevs: false,
+        earlyDevLoad: 1,
         triageWeeks: 4,
         smeFactors: DEFAULT_SME(),
         smeSemantics: 'required',
@@ -91,6 +95,8 @@
     }
     if (c.teamOverhead == null) c.teamOverhead = 0.1;
     if (c.wipLimit == null) c.wipLimit = 2;
+    c.earlyDevs = !!c.earlyDevs;
+    if (!(Number(c.earlyDevLoad) > 0)) c.earlyDevLoad = 1;
     if (c.triageWeeks == null) c.triageWeeks = 4;
     if (!c.smeFactors) { c.smeFactors = DEFAULT_SME(); c.smeSemantics = 'required'; }
     if (c.smeSemantics !== 'required') {
@@ -169,6 +175,8 @@
     const pool = Number(config.devResources) || 0;
     const overhead = Math.max(0, Number(config.teamOverhead) || 0);
     const wip = Number(config.wipLimit) || 0;
+    // Early-stage staffing: developers held by each use case while it is in the stages before Build.
+    const earlyLoad = config.earlyDevs ? Math.min(Number(config.earlyDevLoad) || 1, pool) : 0;
     // A use case that needs a lot of SME time (High) stretches SME-dependent stages. A blank rating has no effect,
     // and a per-use-case override is used exactly as entered.
     const smeF = it => (config.smeFactors && config.smeFactors[it.sme]) || 1;
@@ -248,6 +256,8 @@
     if (engIdx < 0) {
       active.forEach(r => { r.started = true; r.startWk = r.earliest; });
     } else {
+      // Developers currently held by use cases working through their pre-Build stages.
+      const reservedAt = t => active.reduce((m, r) => m + (r.started && r.pre > 1e-9 && r.startWk <= t && t < r.readyAt - 1e-9 ? earlyLoad : 0), 0);
       const eff = a => Math.max(0.3, 1 - overhead * Math.max(0, a - 1));
       const begin = (r, t, inflight) => {
         r.started = true; r.startWk = t; r.readyAt = t + r.pre;
@@ -260,9 +270,10 @@
         for (const r of active) if (!r.started && r.forced && r.earliest <= t) { begin(r, t); inflight++; }
         for (const r of active) {
           if (r.started || r.earliest > t || !depsMet(r, t) || (wip && inflight >= wip)) continue;
+          if (earlyLoad && r.pre > 1e-9 && pool - reservedAt(t) < earlyLoad - 1e-9) continue;   // not enough free developers for its early stages
           begin(r, t); inflight++;
         }
-        let free = pool;
+        let free = pool - reservedAt(t);   // early-stage work is staffed first; Build gets what is left
         for (const r of active) {
           if (free <= 1e-9) break;
           if (!r.started || r.finish !== null || r.readyAt > t) continue;

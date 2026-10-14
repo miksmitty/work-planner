@@ -306,4 +306,16 @@ assert.ok(old.items.every(i => i.stage === 'd'));
   assert.strictEqual(st.items[0].dueDate, null); assert.strictEqual(st.items[1].dueDate, '2027-03-15');   // only ISO dates are kept
 }
 
+// Early stages need developers: off by default; on, each use case holds developers through its pre-Build stages.
+{ const firstStart = (res, i) => res.rows[i].bars.find(b => b.type === 'stage').start;
+  let off = schedule(state(2, ['low', 'low', 'low']));
+  assert.ok([0, 1, 2].every(i => firstStart(off, i) === 0));                      // timeboxes: nobody waits
+  const on = state(2, ['low', 'low', 'low']); on.config.earlyDevs = true; on.config.earlyDevLoad = 1;
+  const res = schedule(on);
+  assert.strictEqual(firstStart(res, 0), 0); assert.strictEqual(firstStart(res, 1), 0);
+  assert.strictEqual(firstStart(res, 2), PRE);                                    // waits until the other two finish early stages
+  assert.ok(res.totalWeeks > off.totalWeeks);
+  const none = state(2, ['low']); none.config.earlyDevs = true; none.config.devResources = 0;
+  assert.doesNotThrow(() => schedule(none)); }
+
 console.log('all tests passed');

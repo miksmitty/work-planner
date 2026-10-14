@@ -28,6 +28,8 @@
       <p class="hint">Most developers that can work on a single use case at once. Work can only be split so far, so this stops one use case swallowing the whole pool.</p></div>
     <div class="setting"><div class="sh"><label for="wip">Max in flight</label><input id="wip" data-nudge="1" type="number" min="0" step="1" placeholder="none"></div>
       <p class="hint">Most use cases in progress at once. Use cases already past the first stage are counted as in flight; ones still at the first stage start when a slot frees up (hatched bar). 0 or blank = no limit.</p></div>
+    <div class="setting"><div class="sh"><label for="early"><input id="early" type="checkbox"> Early stages need developers</label><input id="earlyload" data-nudge="0.5" type="number" min="0.5" step="0.5" title="Developers held by each use case during its stages before Build"></div>
+      <p class="hint">Off: stages before Build are timeboxes done by other people. On: each use case holds this many developers from the pool throughout its stages before Build, and only starts when they are free. Early-stage work is staffed first, so it also slows Build.</p></div>
     <div class="setting"><div class="sh"><label for="ovh">Team overhead</label><input id="ovh" data-nudge="5" type="number" min="0" max="50" step="1"><span class="muted">%</span></div>
       <p class="hint">Throughput lost for each extra developer on the same use case (coordination cost, Brooks' law). At 10%, two developers deliver 1.9 developers' worth of work.</p></div>
     <div class="setting"><div class="sh"><label for="start">Start</label><input id="start" data-nudge="7" type="text" class="dateinp" placeholder="dd-mmm-yyyy"></div>
