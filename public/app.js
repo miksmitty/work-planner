@@ -1006,7 +1006,7 @@ const COLHELP = {
   name: 'Name of the use case.',
   stage: 'Current stage: 0. Stakeholder Triage, then the pipeline stages in order. Earlier stages are skipped; triage is predicted after its estimated weeks. Double-click a cell to change it.',
   pri: 'Priority, 1 = highest. Rows are ordered by most advanced stage first, then priority, and developers are handed out in that order.',
-  cx: 'Complexity of the use case. It sets the Build effort in developer-weeks (see Engineering size on the Setup tab).',
+  cx: 'Complexity of the use case. It sets the Build effort in developer-weeks (see Complexity on the Setup tab).',
   sme: 'SME required: how much subject-matter-expert time the use case needs (H / M / L). Higher stretches the SME-flagged stages.',
   reuse: 'Reuse: how much of the plumbing already exists from earlier deliveries (H / M / L). Higher reduces Build effort.',
   dep: 'Depends on: use cases (by ID) that must finish first before this one can start (finish-to-start). A use case already under way keeps running its current stage; its Build waits. Click a cell to choose them (or edit under "details" on the Use cases tab); copy/paste uses IDs, with ">Stage" for "until that stage completes", e.g. "12>Build, 15". Add " @build" (e.g. "12 @build") for a dependency that lets this use case skip its earlier stages and start at Build once that predecessor is done. Grey arrows in the chart show each link.',
@@ -1330,7 +1330,18 @@ function renderReport() {
   const fr = $('#rpframe'); if (!fr || !plan) return;
   const sel = reportSel(), none = !Object.entries(sel).some(([k, v]) => v && k !== 'noDates');
   $('#rpmsg').textContent = none ? 'Nothing selected: tick at least one element.' : (shown_count_msg());
-  fr.srcdoc = none ? '<body style="font:14px sans-serif;color:#667085;padding:30px">Nothing selected.</body>' : buildAnalysis(sel, false);
+  setPreview(fr, none ? '<!doctype html><body style="font:14px sans-serif;color:#667085;padding:30px">Nothing selected.</body>' : buildAnalysis(sel, false));
+}
+// Re-assigning srcdoc on a frame that already holds a document can leave it blank in some browsers, so every refresh
+// swaps in a brand-new frame, and retries once if the new frame never reports that it loaded.
+let rpSeq = 0;
+function setPreview(old, html, retry = true) {
+  const fr = old.cloneNode(false), seq = ++rpSeq; let loaded = false;
+  fr.removeAttribute('srcdoc');
+  fr.onload = () => { loaded = true; };
+  fr.srcdoc = html;
+  old.replaceWith(fr);
+  if (retry) setTimeout(() => { if (!loaded && seq === rpSeq && fr.isConnected) setPreview(fr, html, false); }, 1500);
 }
 function shown_count_msg() {
   const n = viewItems().filter(x => plan.rows.some(r => r.id === x.it.id)).length;
@@ -1400,9 +1411,15 @@ function buildAnalysis(sel, download) {
   const facTbl = `<table><thead><tr>${th('Level')}${th('SME required', 'n')}${th('Reuse', 'n')}</tr></thead><tbody>${['H', 'M', 'L'].map(k => `<tr>${td(lvl[k])}${td('×' + c.smeFactors[k], 'n')}${td('×' + c.reuseFactors[k], 'n')}</tr>`).join('')}</tbody></table>
     <div class="sub2">SME multiplies the length of: ${stages.filter(s => s.sme).map(s => esc(s.name)).join(', ') || 'no stages'}.<br>Reuse multiplies the effort of: ${stages.filter(s => s.reuse).map(s => esc(s.name)).join(', ') || 'no stages'}.</div>`;
 
-  const inScope = all.length - plan.oos, hasFc = !!fc, when = new Date().toISOString().slice(0, 10);
+  // Headline figures describe exactly the use cases in the report: the whole plan, or just the filtered subset.
+  const sub = all.filter(r => shown.has(r.id)), live = sub.filter(r => !r.oos && r.scheduled);
+  const T = !filtered ? { weeks: plan.totalWeeks, effort: plan.totalEffort, end: plan.endDate, triage: plan.triage, unsched: plan.unscheduled, oos: plan.oos, p80: fc && fc.p80.date }
+    : { weeks: live.reduce((m, r) => Math.max(m, r.end || 0), 0), effort: live.reduce((x, r) => x + r.effort, 0), end: live.reduce((m, r) => r.endDate > m ? r.endDate : m, ''),
+        triage: sub.filter(r => r.triage).length, unsched: sub.filter(r => !r.scheduled && !r.oos).length, oos: sub.filter(r => r.oos).length,
+        p80: fc ? sub.reduce((m, r) => { const f = fc.rows[r.id]; return f && f.p80Date > m ? f.p80Date : m; }, '') || null : null };
+  const inScope = sub.length - T.oos, hasFc = !!fc, when = new Date().toISOString().slice(0, 10);
   const kpi = (k, v) => `<div class="kpi"><div class="v">${v}</div><div class="k">${esc(k)}</div></div>`;
-  const cards = [['general', 'General', general], ['stages', 'Stages', stageTbl], ['sizes', 'Engineering size by complexity', sizeTbl], ['factors', 'SME required and Reuse factors', facTbl]].filter(() => sel.settings).map(x => `<div class="card"><h3>${x[1]}</h3>${x[2]}</div>`);
+  const cards = [['general', 'General', general], ['stages', 'Stages', stageTbl], ['sizes', 'Build effort by complexity', sizeTbl], ['factors', 'SME required and Reuse factors', facTbl]].filter(() => sel.settings).map(x => `<div class="card"><h3>${x[1]}</h3>${x[2]}</div>`);
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Work plan analysis ${when}</title><style>
   :root{--text:#172033;--muted:#667085;--line:#e4e8ee;--bg:#f2f4f8;--accent:#3b5bdb;--accent2:#7048e8;--card:#fff}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -1444,16 +1461,16 @@ function buildAnalysis(sel, download) {
   @media print{.flt,.flt-bar{display:none} body{background:#fff} .hero{background:#1b2a6b;-webkit-print-color-adjust:exact;print-color-adjust:exact;padding-bottom:40px} main{padding:0;margin-top:12px} h2{break-after:avoid} tr{break-inside:avoid} .card{box-shadow:none;border:1px solid var(--line)} .card.tw{max-height:none;overflow:visible} .uc thead th{position:static} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}} @page{size:A3 landscape;margin:12mm}
   @media(max-width:700px){.hero h1{font-size:26px}.hero .big{text-align:left}}
   </style></head><body><header class="hero"><div class="in"><div><div class="eyebrow">Work Planner · ${when}</div><h1>Work plan analysis</h1>
-  <p class="lead">${filtered ? `${shown.size} of ${all.length} use cases (filtered view)` : `${inScope} use cases`}${plan.oos ? ` (+${plan.oos} out of scope)` : ''}</p>
-  <div class="chips"><span class="chip">${c.devResources} developers</span>${ND ? '<span class="chip">Scope and effort only · no dates</span>' : `<span class="chip">Starts ${d(c.startDate)}</span><span class="chip">${wk(plan.totalWeeks)} weeks</span>${hasFc ? `<span class="chip">80% confident by ${d(fc.p80.date)}</span>` : ''}`}</div></div>
-  <div class="big">${ND ? `<div class="k">Total effort</div><div class="v">${Math.round(plan.totalEffort)} dev-wks</div>` : `<div class="k">Planned finish</div><div class="v">${d(plan.endDate)}</div>`}</div></div></header><main>
-  ${sel.kpis ? `<div class="kpis">${ND ? kpi('Use cases', inScope) : kpi('Total duration', wk(plan.totalWeeks) + ' wks')}${kpi('Total effort', Math.round(plan.totalEffort) + ' dev-wks')}${ND ? '' : hasFc ? kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date)) : ''}${ND ? '' : (plan.triage ? kpi('In triage (tentative)', plan.triage) : '') + (plan.unscheduled ? kpi('Unscheduled', plan.unscheduled) : '')}${dueKpis()}</div>` : ''}
+  <p class="lead">${filtered ? `${shown.size} of ${all.length} use cases (filtered view)` : `${inScope} use cases`}${T.oos ? ` (+${T.oos} out of scope)` : ''}</p>
+  <div class="chips"><span class="chip">${c.devResources} developers</span>${ND ? '<span class="chip">Scope and effort only · no dates</span>' : `<span class="chip">Starts ${d(c.startDate)}</span><span class="chip">${wk(T.weeks)} weeks</span>${hasFc && T.p80 ? `<span class="chip">80% confident by ${d(T.p80)}</span>` : ''}`}</div></div>
+  <div class="big">${ND ? `<div class="k">Total effort</div><div class="v">${Math.round(T.effort)} dev-wks</div>` : `<div class="k">Planned finish</div><div class="v">${d(T.end)}</div>`}</div></div></header><main>
+  ${sel.kpis ? `<div class="kpis">${ND ? kpi('Use cases', inScope) : kpi('Total duration', wk(T.weeks) + ' wks')}${kpi('Total effort', Math.round(T.effort) + ' dev-wks')}${ND ? '' : hasFc ? (filtered ? (T.p80 ? kpi('80% confident by (latest in this set)', d(T.p80)) : '') : kpi('50% confident by', d(fc.p50.date)) + kpi('80% confident by', d(fc.p80.date)) + kpi('90% confident by', d(fc.p90.date))) : ''}${ND ? '' : (T.triage ? kpi('In triage (tentative)', T.triage) : '') + (T.unsched ? kpi('Unscheduled', T.unsched) : '')}${dueKpis()}</div>` : ''}
   ${sel.timeline ? `<h2>Timeline</h2><div class="card">${svg}</div>` : ''}
   ${sel.usecases ? `<h2>Use cases</h2><div class="card tw">${useCases}</div><script>(${analysisTableScript.toString()})()</script>` : ''}
   ${sel.usecases && ND ? `<p class="foot">Use cases are listed in priority order (most advanced stage first). <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor. No dates or schedule are included in this export.</p>` : ''}
   ${sel.usecases && !ND ? `<p class="foot">Use cases are handed developers in this order: most advanced stage first, then priority. <b>Build effort</b>: “From complexity” is the expected developer-weeks for the use case's complexity (Settings); “Used” is that figure after the Reuse factor, which is what the plan schedules. <b>Planned finish</b> uses the expected effort; “~” marks a tentative date for a use case still in triage. ${hasFc ? `<b>Required by</b>: “After date” = planned finish is after the date; “Tight” = planned finish meets it but the 80% confident date does not. <b>80% confident</b> comes from ${fc.iterations} simulated runs that vary effort between best and worst case.` : ''}</p>` : ''}
   ${cards.length ? `<h2>Settings</h2><div class="grid">${cards.join('')}</div>` : ''}
-  ${sel.data ? `<script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: state.items }).replace(/</g, '\\u003c')}</script>` : ''}
+  ${sel.data ? `<script type="application/json" id="work-planner-data">${JSON.stringify({ app: 'work-planner-analysis', version: 1, exported: when, config: c, items: filtered ? state.items.filter(it => shown.has(it.id)) : state.items }).replace(/</g, '\\u003c')}</script>` : ''}
   <div class="brand">Generated by Work Planner</div></main></body></html>`;
   if (!download) return html;
   const a = document.createElement('a');
